@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto-Expand Description
 // @namespace    https://www.youtube.com/
-// @version      1.1
+// @version      1.2
 // @description  Clicks "Show More" on the description of videos on page load.
 // @author       Main
 // @match        https://www.youtube.com/*
@@ -15,7 +15,7 @@ waitForKeyElements(".ytd-video-secondary-info-renderer", descClicker);
 
 function descClicker(){
     setTimeout(function() {
-        $("yt-formatted-string[slot^='more-button']:visible").click();
+        $("#expand").click();
         descClicker();
     }, 50);
 }
