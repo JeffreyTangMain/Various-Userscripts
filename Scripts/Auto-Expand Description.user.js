@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto-Expand Description
 // @namespace    https://www.youtube.com/
-// @version      1.3
+// @version      2.0
 // @description  Clicks "Show More" on the description of videos on page load.
 // @author       Main
 // @match        https://www.youtube.com/*
@@ -11,13 +11,11 @@
 // Documenting globals for JSHint to not throw an error
 /* globals waitForKeyElements $ */
 
-waitForKeyElements(".ytd-video-secondary-info-renderer", descClicker);
+waitForKeyElements("tp-yt-paper-button.ytd-text-inline-expander#expand", descClicker, false);
 
 function descClicker(){
-    setTimeout(function() {
-        if(window.location.href.indexOf("watch?v=") > -1){
-            $("tp-yt-paper-button.ytd-text-inline-expander#expand").click();
-        }
-        descClicker();
-    }, 50);
+    if($("tp-yt-paper-button.ytd-text-inline-expander#expand").is(":visible")){
+        $("tp-yt-paper-button.ytd-text-inline-expander#expand:visible").click();
+    }
+    return true;
 }
