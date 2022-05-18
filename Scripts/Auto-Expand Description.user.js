@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto-Expand Description
 // @namespace    https://www.youtube.com/
-// @version      1.2
+// @version      1.3
 // @description  Clicks "Show More" on the description of videos on page load.
 // @author       Main
 // @match        https://www.youtube.com/*
@@ -15,7 +15,9 @@ waitForKeyElements(".ytd-video-secondary-info-renderer", descClicker);
 
 function descClicker(){
     setTimeout(function() {
-        $("#expand").click();
+        if(window.location.href.indexOf("watch?v=") > -1){
+            $("tp-yt-paper-button.ytd-text-inline-expander#expand").click();
+        }
         descClicker();
     }, 50);
 }
