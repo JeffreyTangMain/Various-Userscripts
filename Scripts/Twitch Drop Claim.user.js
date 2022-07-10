@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Drop Claim
 // @namespace    https://www.twitch.tv/
-// @version      2.2
+// @version      2.3
 // @description  Clicks claim on drops.
 // @author       Main
 // @match        https://www.twitch.tv/*
@@ -19,5 +19,11 @@ function liveClicker(){
     if(liveButton != undefined){
         liveButton.click();
     }
-    setTimeout(function(){window.location.href = 'https://www.twitch.tv/drops/inventory'}, 600000);
+    setTimeout(function(){
+        if(window.location.href.indexOf("drops/inventory") > -1) {
+            window.location.href = 'https://www.twitch.tv/drops/inventory';
+        } else{
+            waitForKeyElements('[data-test-selector=drops-list__wrapper]', liveClicker);
+        }
+    }, 600000);
 }
