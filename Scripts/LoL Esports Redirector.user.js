@@ -54,7 +54,6 @@ function mainMethod(){
 function liveClicker(method, loop){
     var liveButton = $('a.live');
     var liveLinkNumber = GM_getValue("liveLinkNumber", 0);
-    console.log(liveLinkNumber + "brabrabr");
     liveButton = liveButton[liveLinkNumber];
     if(liveButton == undefined){
         GM_setValue("liveLinkNumber", 0);
