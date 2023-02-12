@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      3.15
+// @version      3.16
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
 // @match        https://lolesports.com/live/*
 // @grant GM_setValue
 // @grant GM_getValue
+// @run-at        document-start
 // @require http://code.jquery.com/jquery-3.4.1.min.js
 // @require https://cdn.jsdelivr.net/gh/CoeJoder/waitForKeyElements.js@v1.2/waitForKeyElements.js
 // ==/UserScript==
@@ -23,17 +24,18 @@ var oldLog = unsafeWindow.console.log;
 unsafeWindow.console.log = function(msg) {
     try {
         tempString = arguments[5];
-        if(tempString != undefined && tempString.includes('mission') && !(tempString.includes('mission=on') || tempString.includes('drop=on'))){
+        // arguments[2] refers to the text before the -> in the console
+        // Checks if any rewards are enabled
+        if(tempString != undefined && arguments[2].includes('RewardsStatusInformer') && !(tempString.includes('mission=on') || tempString.includes('drop=on'))){
             window.location.href = 'https://lolesports.com/schedule';
         }
-        tempString = arguments[5];
-        if(tempString != undefined && tempString.includes('WatchLive')){
+        // Checks if the video player is playing
+        if(tempString != undefined && arguments[2].includes('VideoPlayer') && tempString.includes('playing')){
             containerLoaded = true;
         }
-        tempString = arguments[2];
-        if(tempString != undefined && tempString.includes('VideoPlayer') && !(tempString.includes('Twitch'))){
-            // Check for the YouTube embed instead of the Twitch embed. Set up the timer later down to work in case it is.
-            containerLoaded = false;
+        // Checks if the video player has ended, which indicates a VOD
+        if(tempString != undefined && arguments[2].includes('VideoPlayer') && tempString.includes('ended')){
+            window.location.href = 'https://lolesports.com/schedule';
         }
     } catch (error) {
         null;
@@ -48,10 +50,13 @@ if(window.location.toString().indexOf('/schedule') != -1){
 }
 
 function mainMethod(){
-    liveClicker(function(){null;});
+    // A refresh function that runs when the live button is undefined and the page is not at the live section
+    // This should refresh when there are no live games to check for new ones every refresh
+    liveClicker(function(){setTimeout(function(){window.location.href = 'https://lolesports.com/schedule'}, 60000)});
 }
 
 function liveClicker(method, loop){
+    // Loops through all the live buttons in order, and resets back to the start of the list once it reaches the end
     var liveButton = $('a.live');
     var liveLinkNumber = GM_getValue("liveLinkNumber", 0);
     liveButton = liveButton[liveLinkNumber];
@@ -62,6 +67,7 @@ function liveClicker(method, loop){
     }
     liveLinkNumber = GM_getValue("liveLinkNumber", 0);
     GM_setValue("liveLinkNumber", liveLinkNumber + 1);
+
     if(liveButton == undefined && window.location.toString().indexOf(redirectPathCheck) == -1){
         return method();
     } else{
@@ -72,15 +78,26 @@ function liveClicker(method, loop){
             clearInterval(loop);
         }
         var manualTimer = 0;
+        var timerThreshold = 30;
+        var rewardsEnabled = false;
         var rewardCheck = setInterval(function() {
-            manualTimer > 10 ? null : manualTimer++;
-            var rewardsIcon = $('.RewardsStatusInformer .status-summary svg path').attr('d');
+            manualTimer > timerThreshold ? null : manualTimer++;
+            var rewardsIcon = $('.RewardsStatusInformer .status-summary svg path').attr('fill');
+            if(rewardsIcon == '#5ABBD4'){
+                rewardsEnabled = true;
+            }
             if(window.location.toString().indexOf(redirectPathCheck) == -1){
+                // Resolves issues if the live stream is clicked out of at any time
+                // Will return to the schedule page if clicked into a page with no live button
+                // If there is a live button, meaning you're on the schedule, it will click it, remove the old loop, and then continue normal operation
                 liveClicker(function(){window.location.href = 'https://lolesports.com/schedule'}, rewardCheck);
-            } else if(rewardsIcon != 'M14.75,8.5 L10.25,13 L8.5,11.25 L7,12.75 L10.25,16 L16.25,10 L14.75,8.5 Z M12,19 C8.14,19 5,15.859 5,12 C5,8.14 8.14,5 12,5 C15.859,5 19,8.14 19,12 C19,15.859 15.859,19 12,19 Z M12,3 C7.029,3 3,7.029 3,12 C3,16.971 7.029,21 12,21 C16.971,21 21,16.971 21,12 C21,7.029 16.971,3 12,3 Z' &&
-                      manualTimer > 10 && containerLoaded == false){
+            } else if((rewardsEnabled == true && rewardsIcon != '#5ABBD4') || (manualTimer > timerThreshold && containerLoaded == false)){
+                // The first check is if rewards were enabled at some point in the past and aren't enabled currently
+                // The second check is a backup wait for some seconds that will refresh the page if the video still hasn't loaded
+                // #5ABBD4 is the fill color when rewards are working, #DE2F2F is the fill color when rewards aren't
                 window.location.href = 'https://lolesports.com/schedule';
             } else if(document.readyState == 'complete'){
+                // Should click the close button on any drop popups
                 if($('.drops-fulfilled').length){
                     var closeReward = document.querySelector (
                         '.drops-fulfilled .actions .close'
