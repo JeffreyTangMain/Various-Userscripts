@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      3.16
+// @version      3.17
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -30,11 +30,15 @@ unsafeWindow.console.log = function(msg) {
             window.location.href = 'https://lolesports.com/schedule';
         }
         // Checks if the video player is playing
-        if(tempString != undefined && arguments[2].includes('VideoPlayer') && tempString.includes('playing')){
+        else if(tempString != undefined && arguments[2].includes('VideoPlayer') && tempString.toLowerCase().includes('playing')){
+            containerLoaded = true;
+        }
+        else if(tempString != undefined && arguments[2].includes('VideoPlayerYouTube') && arguments[4].toLowerCase().includes('playing')){
+            // This is a check specifically for YouTube because it has a different format for the log
             containerLoaded = true;
         }
         // Checks if the video player has ended, which indicates a VOD
-        if(tempString != undefined && arguments[2].includes('VideoPlayer') && tempString.includes('ended')){
+        else if(tempString != undefined && arguments[2].includes('VideoPlayer') && tempString.includes('ended')){
             window.location.href = 'https://lolesports.com/schedule';
         }
     } catch (error) {
