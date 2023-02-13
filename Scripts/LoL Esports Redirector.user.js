@@ -29,7 +29,7 @@ unsafeWindow.console.log = function(msg) {
         if(tempString != undefined && arguments[2].includes('RewardsStatusInformer') && !(tempString.includes('mission=on') || tempString.includes('drop=on'))){
             if(GM_getValue("firstWatching", true) == true) {
                 window.location.href = 'https://lolesports.com/schedule';
-            } else if(GM_getValue("firstWatching", true) == false && GM_getValue("liveLinkNumber", 0) < (GM_getValue("liveGameCount", 1) - 1)) {
+            } else if(GM_getValue("firstWatching", true) == false && GM_getValue("liveLinkNumber", 0) < GM_getValue("liveGameCount", 1)) {
                 window.location.href = 'https://lolesports.com/schedule';
             }
         }
