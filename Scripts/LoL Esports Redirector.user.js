@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.0
+// @version      4.1
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -30,6 +30,10 @@ unsafeWindow.console.log = function(msg) {
             if(GM_getValue("firstWatching", true) == true) {
                 window.location.href = 'https://lolesports.com/schedule';
             } else if(GM_getValue("firstWatching", true) == false && GM_getValue("liveLinkNumber", 0) < GM_getValue("liveGameCount", 1)) {
+                GM_setValue("currentHour", new Date().getHours());
+                window.location.href = 'https://lolesports.com/schedule';
+            } else if(GM_getValue("firstWatching", true) == false && GM_getValue("currentHour", 0) != new Date().getHours()){
+                GM_setValue("currentHour", new Date().getHours());
                 window.location.href = 'https://lolesports.com/schedule';
             }
         }
@@ -44,6 +48,10 @@ unsafeWindow.console.log = function(msg) {
         else if(tempString != undefined && arguments[2].includes('VideoPlayerYouTube') && arguments[4].toLowerCase().includes('playing')){
             // This is a check specifically for YouTube because it has a different format for the log
             containerLoaded = true;
+        }
+        else if(tempString != undefined && arguments[2].includes('WatchLive') && arguments[4].length == undefined){
+            // Check for an erroring WatchLive, which is another indicator of the stream ending
+            window.location.href = 'https://lolesports.com/schedule';
         }
         // Checks if the video player has ended, which indicates a VOD
         else if(tempString != undefined && arguments[2].includes('VideoPlayer') && tempString.includes('ended')){
