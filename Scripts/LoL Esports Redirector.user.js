@@ -31,7 +31,7 @@ unsafeWindow.console.log = function(msg) {
             } else if(GM_getValue("firstWatching", true) == false && GM_getValue("liveLinkNumber", 0) < GM_getValue("liveGameCount", 1)) {
                 GM_setValue("currentMinute", Date.now());
                 window.location.href = 'https://lolesports.com/schedule';
-            } else if(GM_getValue("firstWatching", true) == false && (Date.now() - GM_getValue("currentMinute", 0)) > 600000){
+            } else if(GM_getValue("firstWatching", true) == false && (Date.now() - GM_getValue("currentMinute", 0)) > 60000){
                 GM_setValue("currentMinute", Date.now());
                 window.location.href = 'https://lolesports.com/schedule';
             }
