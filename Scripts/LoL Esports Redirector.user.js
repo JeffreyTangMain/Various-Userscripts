@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.1
+// @version      4.1.1
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -41,20 +41,20 @@ unsafeWindow.console.log = function(msg) {
         else if(tempString != undefined && arguments[2].includes('RewardsStatusInformer') && (tempString.includes('mission=on') || tempString.includes('drop=on'))){
             GM_setValue("firstWatching", true);
         }
+        // Checks if the video player has ended, which indicates a VOD
+        else if(tempString != undefined && arguments[2].includes('VideoPlayer') && tempString.includes('ended')){
+            window.location.href = 'https://lolesports.com/schedule';
+        }
         // Checks if the video player is playing
         else if(tempString != undefined && arguments[2].includes('VideoPlayer') && tempString.toLowerCase().includes('playing')){
             containerLoaded = true;
         }
-        else if(tempString != undefined && arguments[2].includes('VideoPlayerYouTube') && arguments[4].toLowerCase().includes('playing')){
-            // This is a check specifically for YouTube because it has a different format for the log
+        // This is a check specifically for YouTube because it has a different format for the log
+        else if(arguments[2].includes('VideoPlayerYouTube') && arguments[4].toLowerCase().includes('playing')){
             containerLoaded = true;
         }
-        else if(tempString != undefined && arguments[2].includes('WatchLive') && arguments[4].length == undefined){
-            // Check for an erroring WatchLive, which is another indicator of the stream ending
-            window.location.href = 'https://lolesports.com/schedule';
-        }
-        // Checks if the video player has ended, which indicates a VOD
-        else if(tempString != undefined && arguments[2].includes('VideoPlayer') && tempString.includes('ended')){
+        // Check for an erroring WatchLive, which is another indicator of the stream ending
+        else if(arguments[2].includes('WatchLive') && arguments[4].length == undefined){
             window.location.href = 'https://lolesports.com/schedule';
         }
     } catch (error) {
