@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.1.2
+// @version      4.1.3
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -29,10 +29,10 @@ unsafeWindow.console.log = function(msg) {
             if(GM_getValue("firstWatching", true) == true) {
                 window.location.href = 'https://lolesports.com/schedule';
             } else if(GM_getValue("firstWatching", true) == false && GM_getValue("liveLinkNumber", 0) < GM_getValue("liveGameCount", 1)) {
-                GM_setValue("currentHour", new Date().getHours());
+                GM_setValue("currentMinute", Date.now());
                 window.location.href = 'https://lolesports.com/schedule';
-            } else if(GM_getValue("firstWatching", true) == false && GM_getValue("currentHour", 0) != new Date().getHours()){
-                GM_setValue("currentHour", new Date().getHours());
+            } else if(GM_getValue("firstWatching", true) == false && (Date.now() - GM_getValue("currentMinute", 0)) > 600000){
+                GM_setValue("currentMinute", Date.now());
                 window.location.href = 'https://lolesports.com/schedule';
             }
         }
