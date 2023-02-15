@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.1.1
+// @version      4.1.2
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -23,10 +23,9 @@ var oldLog = unsafeWindow.console.log;
 
 unsafeWindow.console.log = function(msg) {
     try {
-        tempString = arguments[5];
         // arguments[2] refers to the text before the -> in the console
         // Checks if any rewards are enabled
-        if(tempString != undefined && arguments[2].includes('RewardsStatusInformer') && !(tempString.includes('mission=on') || tempString.includes('drop=on'))){
+        if(arguments[2].includes('RewardsStatusInformer') && !(arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
             if(GM_getValue("firstWatching", true) == true) {
                 window.location.href = 'https://lolesports.com/schedule';
             } else if(GM_getValue("firstWatching", true) == false && GM_getValue("liveLinkNumber", 0) < GM_getValue("liveGameCount", 1)) {
@@ -38,15 +37,15 @@ unsafeWindow.console.log = function(msg) {
             }
         }
         // If there are rewards, reset the first watching value to reset if the rewards disappear
-        else if(tempString != undefined && arguments[2].includes('RewardsStatusInformer') && (tempString.includes('mission=on') || tempString.includes('drop=on'))){
+        else if(arguments[2].includes('RewardsStatusInformer') && (arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
             GM_setValue("firstWatching", true);
         }
         // Checks if the video player has ended, which indicates a VOD
-        else if(tempString != undefined && arguments[2].includes('VideoPlayer') && tempString.includes('ended')){
+        else if(arguments[2].includes('VideoPlayer') && arguments[5].includes('ended')){
             window.location.href = 'https://lolesports.com/schedule';
         }
         // Checks if the video player is playing
-        else if(tempString != undefined && arguments[2].includes('VideoPlayer') && tempString.toLowerCase().includes('playing')){
+        else if(arguments[2].includes('VideoPlayer') && arguments[5].toLowerCase().includes('playing')){
             containerLoaded = true;
         }
         // This is a check specifically for YouTube because it has a different format for the log
