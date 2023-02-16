@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.1.3
+// @version      4.2.0
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -26,19 +26,11 @@ unsafeWindow.console.log = function(msg) {
         // arguments[2] refers to the text before the -> in the console
         // Checks if any rewards are enabled
         if(arguments[2].includes('RewardsStatusInformer') && !(arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
-            if(GM_getValue("firstWatching", true) == true) {
+            if(GM_getValue("liveLinkNumber", 0) < GM_getValue("liveGameCount", 1)) {
                 window.location.href = 'https://lolesports.com/schedule';
-            } else if(GM_getValue("firstWatching", true) == false && GM_getValue("liveLinkNumber", 0) < GM_getValue("liveGameCount", 1)) {
-                GM_setValue("currentMinute", Date.now());
-                window.location.href = 'https://lolesports.com/schedule';
-            } else if(GM_getValue("firstWatching", true) == false && (Date.now() - GM_getValue("currentMinute", 0)) > 60000){
-                GM_setValue("currentMinute", Date.now());
+            } else if((Date.now() - GM_getValue("currentMinute", 0)) > 300000){
                 window.location.href = 'https://lolesports.com/schedule';
             }
-        }
-        // If there are rewards, reset the first watching value to reset if the rewards disappear
-        else if(arguments[2].includes('RewardsStatusInformer') && (arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
-            GM_setValue("firstWatching", true);
         }
         // Checks if the video player has ended, which indicates a VOD
         else if(arguments[2].includes('VideoPlayer') && arguments[5].includes('ended')){
@@ -71,7 +63,7 @@ if(window.location.toString().indexOf('/schedule') != -1){
 function mainMethod(){
     // A refresh function that runs when the live button is undefined and the page is not at the live section
     // This should refresh when there are no live games to check for new ones every refresh
-    liveClicker(function(){setTimeout(function(){window.location.href = 'https://lolesports.com/schedule'}, 60000)});
+    liveClicker(function(){setTimeout(function(){window.location.href = 'https://lolesports.com/schedule'}, 300000)});
 }
 
 function liveClicker(method, loop){
@@ -87,16 +79,10 @@ function liveClicker(method, loop){
         liveGameList.each(function() {
             liveGameLinks = liveGameLinks + this.href;
         });
-        // Rewatch everything even if the links are the same but an hour has gone by since the last time watched
-        if((currentTime - storedTime) > 3600000 && (GM_getValue("liveGameLinks", '') == liveGameLinks)){
-            GM_setValue("storedTime", currentTime);
-            GM_setValue("firstWatching", true);
-            GM_setValue("liveLinkNumber", 0);
-        } else if(GM_getValue("liveGameLinks", '') != liveGameLinks) {
+        if(GM_getValue("liveGameLinks", '') != liveGameLinks) {
             GM_setValue("storedTime", currentTime);
             GM_setValue("liveGameCount", liveGameList.length);
             GM_setValue("liveGameLinks", liveGameLinks);
-            GM_setValue("firstWatching", true);
             GM_setValue("liveLinkNumber", 0);
         }
     }
@@ -104,13 +90,15 @@ function liveClicker(method, loop){
     var liveLinkNumber = GM_getValue("liveLinkNumber", 0);
     liveButton = liveButton[liveLinkNumber];
     if(liveButton == undefined){
-        GM_setValue("firstWatching", false);
         GM_setValue("liveLinkNumber", 0);
         liveButton = $('a.live');
         liveButton = liveButton[0];
     }
     liveLinkNumber = GM_getValue("liveLinkNumber", 0);
     GM_setValue("liveLinkNumber", liveLinkNumber + 1);
+
+    //Prepares the timer when the page is loaded to refresh if there are no rewards.
+    GM_setValue("currentMinute", Date.now());
 
     if(liveButton == undefined && window.location.toString().indexOf(redirectPathCheck) == -1){
         return method();
@@ -122,7 +110,7 @@ function liveClicker(method, loop){
             clearInterval(loop);
         }
         var manualTimer = 0;
-        var timerThreshold = 30;
+        var timerThreshold = 60;
         var rewardsEnabled = false;
         var rewardCheck = setInterval(function() {
             manualTimer > timerThreshold ? null : manualTimer++;
@@ -134,27 +122,11 @@ function liveClicker(method, loop){
                 // Resolves issues if the live stream is clicked out of at any time
                 // Will return to the schedule page if clicked into a page with no live button
                 // If there is a live button, meaning you're on the schedule, it will click it, remove the old loop, and then continue normal operation
-                // The live link number needs to be deincremented by 1 to make sure it doesn't start skipping forwards in streams just by clicking away
-                liveLinkNumber = GM_getValue("liveLinkNumber", 0);
-                if(liveLinkNumber - 1 >= 0){
-                    liveLinkNumber = liveLinkNumber - 1;
-                } else{
-                    liveLinkNumber = 0;
-                }
-                GM_setValue("liveLinkNumber", liveLinkNumber);
                 liveClicker(function(){window.location.href = 'https://lolesports.com/schedule'}, rewardCheck);
-            } else if((rewardsEnabled == true && rewardsIcon != '#5ABBD4') || (manualTimer > timerThreshold && containerLoaded == false)){
+            } else if((rewardsEnabled == true && rewardsIcon != '#5ABBD4') || (manualTimer > timerThreshold && (containerLoaded == false || rewardsEnabled == false))){
                 // The first check is if rewards were enabled at some point in the past and aren't enabled currently
                 // The second check is a backup wait for some seconds that will refresh the page if the video still hasn't loaded
                 // #5ABBD4 is the fill color when rewards are working, #DE2F2F is the fill color when rewards aren't
-                // Live link number is deincremented by 1 to let the script double check any links that happen to not load because of a bad video player
-                liveLinkNumber = GM_getValue("liveLinkNumber", 0);
-                if(liveLinkNumber - 1 >= 0){
-                    liveLinkNumber = liveLinkNumber - 1;
-                } else{
-                    liveLinkNumber = 0;
-                }
-                GM_setValue("liveLinkNumber", liveLinkNumber);
                 window.location.href = 'https://lolesports.com/schedule';
             } else if(document.readyState == 'complete'){
                 // Should click the close button on any drop popups
