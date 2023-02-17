@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.2.1
+// @version      4.3.0
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -18,17 +18,23 @@
 var redirectPathCheck = '/live';
 var containerLoaded = false;
 var tempString = '';
+var delayRefreshTimer = 300000;
 
 var oldLog = unsafeWindow.console.log;
 
 unsafeWindow.console.log = function(msg) {
     try {
         // arguments[2] refers to the text before the -> in the console
-        // Checks if any rewards are enabled
-        if(arguments[2].includes('RewardsStatusInformer') && !(arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
+        if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('stopped') && (Date.now() - GM_getValue("currentMinute", 0)) > delayRefreshTimer){
+            // arguments[4] includes the heartbeater status update
+            // Refreshes after a delay if the RewardsStatusInformer's heartbeat has stopped
+            window.location.href = 'https://lolesports.com/schedule';
+        }
+        else if(arguments[2].includes('RewardsStatusInformer') && !(arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
+            // Checks if any rewards are enabled
             if(GM_getValue("liveLinkNumber", 0) < GM_getValue("liveGameCount", 1)) {
                 window.location.href = 'https://lolesports.com/schedule';
-            } else if((Date.now() - GM_getValue("currentMinute", 0)) > 300000){
+            } else if((Date.now() - GM_getValue("currentMinute", 0)) > delayRefreshTimer){
                 window.location.href = 'https://lolesports.com/schedule';
             }
         }
@@ -63,7 +69,7 @@ if(window.location.toString().indexOf('/schedule') != -1){
 function mainMethod(){
     // A refresh function that runs when the live button is undefined and the page is not at the live section
     // This should refresh when there are no live games to check for new ones every refresh
-    liveClicker(function(){setTimeout(function(){window.location.href = 'https://lolesports.com/schedule'}, 300000)});
+    liveClicker(function(){setTimeout(function(){window.location.href = 'https://lolesports.com/schedule'}, delayRefreshTimer)});
 }
 
 function liveClicker(method, loop){
