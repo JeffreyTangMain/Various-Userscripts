@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.2.0
+// @version      4.2.1
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -70,17 +70,14 @@ function liveClicker(method, loop){
     // Loops through all the live buttons in order, and resets back to the start of the list once it reaches the end
     var liveButton = $('a.live');
     // ---------------------------------------
-    // This chunk of code manages the userscript's memory of having gone through all the current live links, and to stop refreshing for new ones for 1 hour if they've all been watched
+    // This chunk of code manages the userscript's memory of having gone through all the current live links
     if(window.location.toString().indexOf('/schedule') != -1){
         var liveGameList = $('a.live');
         var liveGameLinks = "";
-        var currentTime = Date.now();
-        var storedTime = GM_getValue("storedTime", 0);
         liveGameList.each(function() {
             liveGameLinks = liveGameLinks + this.href;
         });
         if(GM_getValue("liveGameLinks", '') != liveGameLinks) {
-            GM_setValue("storedTime", currentTime);
             GM_setValue("liveGameCount", liveGameList.length);
             GM_setValue("liveGameLinks", liveGameLinks);
             GM_setValue("liveLinkNumber", 0);
