@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.3.0
+// @version      4.3.1
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -25,7 +25,7 @@ var oldLog = unsafeWindow.console.log;
 unsafeWindow.console.log = function(msg) {
     try {
         // arguments[2] refers to the text before the -> in the console
-        if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('stopped') && (Date.now() - GM_getValue("currentMinute", 0)) > delayRefreshTimer){
+        if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('stopped')){
             // arguments[4] includes the heartbeater status update
             // Refreshes after a delay if the RewardsStatusInformer's heartbeat has stopped
             window.location.href = 'https://lolesports.com/schedule';
