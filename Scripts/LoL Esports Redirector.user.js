@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.3.1
+// @version      4.3.2
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -73,6 +73,11 @@ function mainMethod(){
 }
 
 function liveClicker(method, loop){
+    // Finds and clicks all leagues that aren't currently enabled
+    var clickedLeagues = $('button.button.league')
+    clickedLeagues.filter(":not('.selected')").each(function() {
+        this.click();
+    })
     // Loops through all the live buttons in order, and resets back to the start of the list once it reaches the end
     var liveButton = $('a.live');
     // ---------------------------------------
