@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.3.2
+// @version      4.3.3
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
 // @match        https://lolesports.com/live/*
+// @match        https://www.youtube.com/embed/*lolesports.com*
 // @grant GM_setValue
 // @grant GM_getValue
 // @run-at        document-start
@@ -58,6 +59,15 @@ unsafeWindow.console.log = function(msg) {
         null;
     }
     oldLog.apply(null, arguments);
+}
+
+waitForKeyElements("button.ytp-play-button", autoplayEmbed, false);
+
+function autoplayEmbed(){
+    if($("button.ytp-play-button").attr("data-title-no-tooltip") != "Pause"){
+        $("button.ytp-large-play-button").click();
+    }
+    return true;
 }
 
 if(window.location.toString().indexOf('/schedule') != -1){
