@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://www.youtube.com/
-// @version      2.0.0
+// @version      2.0.1
 // @description  Watches YouTube or Twitch live streams automatically as they appear.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -33,7 +33,7 @@ function youTubeMethod() {
         returnToLive();
     } else if(window.location.toString().indexOf('/streams') != -1) {
         startingChannel = window.location.href;
-        if(liveButton.length == 0 && reloadStreams != undefined) {
+        if(liveButton.length == 0 && reloadStreams == undefined) {
             // If the button does not exist, wait some time before refreshing the stream page
             // Note: clicking into a live stream continues to render the streams page, making this not work if any other live streams are available
             var reloadStreams = setInterval(function() {
