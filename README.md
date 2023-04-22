@@ -1,8 +1,8 @@
 # Various-Userscripts
 
-Auto-Expand Description: Automatically expands YouTube's description.
-
 Auto Live Watcher: Checks for and watches any available YouTube or Twitch live streams automatically.
+
+Auto-Expand Description: Automatically expands YouTube's description.
 
 Close Tab on Invalid Invite: This closes a https://discord.com/invite/ link if the link is invalid. Used to bruteforce a Discord invite that didn't exist, oops!
 
