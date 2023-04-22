@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Live Watcher
 // @namespace    https://www.youtube.com/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Watches YouTube live streams automatically as they appear.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -28,13 +28,13 @@ function mainMethod() {
         returnToLive();
     } else if(window.location.toString().indexOf('/streams') != -1) {
         startingChannel = window.location.href;
-        if(liveButton.length == 0) {
+        if(liveButton.length == 0 && reloadStreams != undefined) {
             // If the button does not exist, wait some time before refreshing the stream page
             // Note: clicking into a live stream continues to render the streams page, making this not work if any other live streams are available
             var reloadStreams = setInterval(function() {
                 returnToLive();
             }, 300000);
-        } else{
+        } else if (liveButton.length != 0) {
             // Click button if on the live stream page and remove the reload interval if it exists
             if(reloadStreams != undefined) {
                 clearInterval(reloadStreams);
@@ -52,5 +52,5 @@ function mainMethod() {
 
 function returnToLive() {
     // Return to stream list of saved streamer
-    window.location.href = startingChannel;
+    window.location.assign(startingChannel);
 }
