@@ -10,4 +10,4 @@ LoL Esports Redirector: Automatically sends you to the live page for lolesports.
 
 Twitch Drop Claim: If you load the Twitch drop page, this extension will automatically pick it up for you.
 
-YouTube Live Watcher: Checks for and watches any available YouTube live streams automatically.
+Auto Live Watcher: Checks for and watches any available YouTube or Twitch live streams automatically.
