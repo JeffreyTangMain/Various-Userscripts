@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://www.youtube.com/
-// @version      3.0.0
+// @version      3.1.0
 // @description  Watches YouTube or Twitch live streams automatically as they appear.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -17,9 +17,17 @@
 var startingChannel = window.location.href;
 // Checks for the website you're currently on and runs the appropriate check
 if (window.location.toString().indexOf('youtube.com') != -1) {
-    waitForKeyElements(".ytd-two-column-browse-results-renderer", setInterval(youTubeMethod, 3000));
+    waitForKeyElements(".ytd-two-column-browse-results-renderer", createLoopingInterval(youTubeMethod, 1000));
 } else if (window.location.toString().indexOf('twitch.tv') != -1) {
-    waitForKeyElements(".channel-info-content", setInterval(twitchMethod, 3000));
+    waitForKeyElements(".channel-info-content", createLoopingInterval(twitchMethod, 1000));
+}
+
+function createLoopingInterval(method, timer) {
+    // Attempts to stop multiple loops from existing at once
+    if(typeof loopingInterval == 'undefined') {
+        clearInterval(loopingInterval);
+        var loopingInterval = setInterval(method, timer);
+    }
 }
 
 function youTubeMethod() {
@@ -29,17 +37,18 @@ function youTubeMethod() {
     var streamEnd = $("div.html5-endscreen[style='']");
 
     if (window.location.toString().indexOf('/watch') != -1) {
-        clearInterval(reloadStreams);
+        clearTimeout(reloadStreams);
         if (streamEnd.length != 0) {
             // If the recommendation screen is showing, return to the stream list
             returnToLive();
         }
     } else if (window.location.toString().indexOf('/streams') != -1) {
         startingChannel = window.location.href;
-        if (liveButton.length == 0 && reloadStreams == undefined) {
+        if (liveButton.length == 0 && typeof reloadStreams == 'undefined') {
             // If the button does not exist, wait some time before refreshing the stream page
             // Note: clicking into a live stream continues to render the streams page, making this not work if any other live streams are available
-            var reloadStreams = setInterval(returnToLive, 300000);
+            clearTimeout(reloadStreams);
+            var reloadStreams = setTimeout(returnToLive, 300000);
         } else if (liveButton.length != 0) {
             // Click button if on the live stream page
             liveButton[0].click();
@@ -66,11 +75,11 @@ function twitchMethod() {
         startingChannel = window.location.href;
     }
 
-    if (liveIcon != undefined && liveIcon.text() == "LIVE") {
-        if (offlineText != undefined && offlineText.text().includes("Follow and get notified when")) {
+    if (typeof liveIcon != 'undefined' && liveIcon.text() == "LIVE") {
+        if (typeof offlineText != 'undefined' && offlineText.text().includes("Follow and get notified when")) {
             // If not live, go back to the about page
             returnToLive();
-        } else if (pauseButton[0] != undefined && pauseButton.attr("data-a-player-state") == "playing") {
+        } else if (typeof pauseButton[0] != 'undefined' && pauseButton.attr("data-a-player-state") == "playing") {
             // Unpauses the video
             pauseButton.click();
         }
