@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://www.youtube.com/
-// @version      3.1.0
-// @description  Watches YouTube or Twitch live streams automatically as they appear.
+// @version      3.2.0
+// @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
 // @match        https://www.twitch.tv/*/about
+// @match        https://www.twitch.tv/drops/inventory
 // @run-at        document-start
 // @require http://code.jquery.com/jquery-3.4.1.min.js
 // @require https://cdn.jsdelivr.net/gh/CoeJoder/waitForKeyElements.js@v1.2/waitForKeyElements.js
@@ -18,6 +19,8 @@ var startingChannel = window.location.href;
 // Checks for the website you're currently on and runs the appropriate check
 if (window.location.toString().indexOf('youtube.com') != -1) {
     waitForKeyElements(".ytd-two-column-browse-results-renderer", createLoopingInterval(youTubeMethod, 1000));
+} else if (window.location.toString().indexOf('drops/inventory') != -1) {
+    waitForKeyElements("[data-test-selector=drops-list__wrapper]", dropClicker);
 } else if (window.location.toString().indexOf('twitch.tv') != -1) {
     waitForKeyElements(".channel-info-content", createLoopingInterval(twitchMethod, 1000));
 }
@@ -73,17 +76,32 @@ function twitchMethod() {
     if (window.location.toString().indexOf('/about') != -1) {
         // If on the about page to start, save the URL to return to later
         startingChannel = window.location.href;
+        if (typeof liveIcon != 'undefined' && liveIcon.text() == "LIVE") {
+            // If live, click the live icon to join stream
+            liveIcon.click();
+        }
     }
 
-    if (typeof liveIcon != 'undefined' && liveIcon.text() == "LIVE") {
-        if (typeof offlineText != 'undefined' && offlineText.text().includes("Follow and get notified when")) {
-            // If not live, go back to the about page
-            returnToLive();
-        } else if (typeof pauseButton[0] != 'undefined' && pauseButton.attr("data-a-player-state") == "playing") {
-            // Unpauses the video
-            pauseButton.click();
-        }
-        // If live, click the live icon to join stream
-        liveIcon.click();
+    if (typeof offlineText != 'undefined' && offlineText.text().includes("Follow and get notified when")) {
+        // If not live, go back to the about page
+        returnToLive();
+    } else if (typeof pauseButton[0] != 'undefined' && pauseButton.attr("data-a-player-state") == "paused") {
+        // Unpauses the video
+        pauseButton[0].click();
     }
+}
+
+function dropClicker() {
+    // Selector for claim button
+    var dropClaimButton = $('[data-test-selector="DropsCampaignInProgressRewardPresentation-claim-button"]');
+
+    for(var i = 0; i < dropClaimButton.length; i++){
+        // Click every claim button if they exist
+        if(typeof dropClaimButton[i] != 'undefined') {
+            dropClaimButton[i].click();
+        }
+    }
+
+    // Refresh after the timeout goes through and after clicking all the drop claims
+    var reloadStreams = setTimeout(returnToLive, 300000);
 }
