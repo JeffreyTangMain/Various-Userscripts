@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://www.youtube.com/
-// @version      3.2.0
+// @version      3.3.0
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -27,7 +27,7 @@ if (window.location.toString().indexOf('youtube.com') != -1) {
 
 function createLoopingInterval(method, timer) {
     // Attempts to stop multiple loops from existing at once
-    if(typeof loopingInterval == 'undefined') {
+    if (typeof loopingInterval == 'undefined') {
         clearInterval(loopingInterval);
         var loopingInterval = setInterval(method, timer);
     }
@@ -38,12 +38,17 @@ function youTubeMethod() {
     var liveButton = $("ytd-thumbnail-overlay-time-status-renderer.style-scope.ytd-thumbnail[overlay-style='LIVE']");
     // Selects the recommendation screen when a stream ends
     var streamEnd = $("div.html5-endscreen[style='']");
+    // Click the live icon just in case the video becomes paused or falls behind
+    var liveStatus = $(".ytp-live-badge:not(:disabled)");
 
     if (window.location.toString().indexOf('/watch') != -1) {
         clearTimeout(reloadStreams);
         if (streamEnd.length != 0) {
             // If the recommendation screen is showing, return to the stream list
             returnToLive();
+        } else if (liveStatus.length != 0) {
+            // Click the live indicator when paused or behind
+            liveStatus.click();
         }
     } else if (window.location.toString().indexOf('/streams') != -1) {
         startingChannel = window.location.href;
@@ -95,9 +100,9 @@ function dropClicker() {
     // Selector for claim button
     var dropClaimButton = $('[data-test-selector="DropsCampaignInProgressRewardPresentation-claim-button"]');
 
-    for(var i = 0; i < dropClaimButton.length; i++){
+    for (var i = 0; i < dropClaimButton.length; i++) {
         // Click every claim button if they exist
-        if(typeof dropClaimButton[i] != 'undefined') {
+        if (typeof dropClaimButton[i] != 'undefined') {
             dropClaimButton[i].click();
         }
     }
