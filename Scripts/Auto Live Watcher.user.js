@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://www.youtube.com/
-// @version      3.3.1
+// @version      3.3.2
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -86,15 +86,13 @@ function twitchMethod() {
             liveIcon.click();
         }
     } else {
-        if (typeof pauseButton[0] != 'undefined' && pauseButton.attr("data-a-player-state") == "paused") {
+        if (typeof offlineText != 'undefined' && offlineText.text().includes("Follow and get notified when")) {
+            // If not live, go back to the about page
+            returnToLive();
+        } else if (typeof pauseButton[0] != 'undefined' && pauseButton.attr("data-a-player-state") == "paused") {
             // Unpauses the video
             pauseButton[0].click();
         }
-    }
-
-    if (typeof offlineText != 'undefined' && offlineText.text().includes("Follow and get notified when")) {
-        // If not live, go back to the about page
-        returnToLive();
     }
 }
 
