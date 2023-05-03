@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://www.youtube.com/
-// @version      3.3.3
+// @version      3.3.4
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -78,15 +78,20 @@ function twitchMethod() {
     var offlineText = $('[data-test-selector="follow-panel-overlay"] [class^="CoreText"]');
     var pauseButton = $('[data-a-target="player-play-pause-button"]');
     var matureAcceptanceButton = $('[data-a-target="player-overlay-mature-accept"]');
+    var oneClick = false;
 
     if (window.location.toString().indexOf('/about') != -1) {
         // If on the about page to start, save the URL to return to later
         startingChannel = window.location.href;
-        if (typeof liveIcon != 'undefined' && liveIcon.text() == "LIVE") {
+        if (typeof liveIcon != 'undefined' && liveIcon.text() == "LIVE" && oneClick == false) {
+            // Toggle the oneClick variable to only click once in case the redirect takes too much time
+            oneClick = true;
             // If live, click the live icon to join stream
             liveIcon.click();
         }
     } else {
+        // Reset the oneClick variable to work if you return to the about page or leave for any reason
+        oneClick = false;
         if (typeof offlineText != 'undefined' && offlineText.text().includes("Follow and get notified when")) {
             // If not live, go back to the about page
             returnToLive();
