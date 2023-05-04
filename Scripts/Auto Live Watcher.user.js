@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://www.youtube.com/
-// @version      3.3.4
+// @version      3.3.5
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -16,6 +16,9 @@
 
 // Saves where you start this script so you can jump back to it later
 var startingChannel = window.location.href;
+var watchedStream = window.location.href;
+// Only grab the stream URL once for redirect purposes
+var gotStreamLink = false;
 // Checks for the website you're currently on and runs the appropriate check
 if (window.location.toString().indexOf('youtube.com') != -1) {
     waitForKeyElements(".ytd-two-column-browse-results-renderer", createLoopingInterval(youTubeMethod, 1000));
@@ -43,6 +46,10 @@ function youTubeMethod() {
 
     if (window.location.toString().indexOf('/watch') != -1) {
         clearTimeout(reloadStreams);
+        if (gotStreamLink == false) {
+            watchedStream = window.location.href;
+            gotStreamLink = true;
+        }
         if (streamEnd.length != 0) {
             // If the recommendation screen is showing, return to the stream list
             returnToLive();
@@ -52,6 +59,7 @@ function youTubeMethod() {
         }
     } else if (window.location.toString().indexOf('/streams') != -1) {
         startingChannel = window.location.href;
+        gotStreamLink = false;
         if (liveButton.length == 0 && typeof reloadStreams == 'undefined') {
             // If the button does not exist, wait some time before refreshing the stream page
             // Note: clicking into a live stream continues to render the streams page, making this not work if any other live streams are available
@@ -61,8 +69,10 @@ function youTubeMethod() {
             // Click button if on the live stream page
             liveButton[0].click();
         }
-    } else if (window.location.toString().indexOf('/watch') == -1 && window.location.toString().indexOf('/streams') == -1) {
-        // Return to stream list if you move away
+    }
+
+    if (window.location.toString() != watchedStream && window.location.toString() != startingChannel && gotStreamLink == true) {
+        // Return to stream if you move away
         returnToLive();
     }
 }
@@ -102,6 +112,12 @@ function twitchMethod() {
             // Clicks the mature acceptance button
             matureAcceptanceButton[0].click();
         }
+    }
+
+    // Variable and check for leaving the channel so you can return to the about page
+    watchedStream = startingChannel.replace('/about','');
+    if (window.location.toString() != startingChannel && window.location.toString() != watchedStream) {
+        returnToLive();
     }
 }
 
