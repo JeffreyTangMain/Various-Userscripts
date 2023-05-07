@@ -10,4 +10,6 @@ Genshin Assistant: Open a page like https://www.hoyolab.com/genshin/topicDetail/
 
 LoL Esports Redirector: Automatically sends you to the live page for lolesports.com and will refresh if drops aren't working. I spent a long time on this and still don't know if it's working properly.
 
+Pick'ems Guesser: Automatically does pick'ems for you based on fan trends.
+
 Twitch Drop Claim: If you load the Twitch drop page, this extension will automatically pick it up for you.
