@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://www.youtube.com/
-// @version      3.3.5
+// @version      3.3.6
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
 // @match        https://www.twitch.tv/*/about
 // @match        https://www.twitch.tv/drops/inventory
+// @grant         GM_setValue
+// @grant         GM_getValue
 // @run-at        document-start
 // @require http://code.jquery.com/jquery-3.4.1.min.js
 // @require https://cdn.jsdelivr.net/gh/CoeJoder/waitForKeyElements.js@v1.2/waitForKeyElements.js
@@ -46,8 +48,11 @@ function youTubeMethod() {
 
     if (window.location.toString().indexOf('/watch') != -1) {
         clearTimeout(reloadStreams);
-        if (gotStreamLink == false) {
-            watchedStream = window.location.href;
+        if (GM_getValue("watchedStream", "") != window.location.href && gotStreamLink == false) {
+            gotStreamLink = true;
+            var firstViewing = setTimeout(returnToLive, 600000);
+            GM_setValue("watchedStream", window.location.href);
+        } else {
             gotStreamLink = true;
         }
         if (streamEnd.length != 0) {
@@ -71,7 +76,7 @@ function youTubeMethod() {
         }
     }
 
-    if (window.location.toString() != watchedStream && window.location.toString() != startingChannel && gotStreamLink == true) {
+    if (window.location.toString() != GM_getValue("watchedStream", window.location.href) && window.location.toString() != startingChannel && gotStreamLink == true) {
         // Return to stream if you move away
         returnToLive();
     }
