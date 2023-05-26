@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pick'ems Guesser
 // @namespace    https://pickem.overwatchleague.com//
-// @version      1.0.0
+// @version      1.0.1
 // @description  Automatically guesses Pick'ems for you based on the fan favorites.
 // @author       Main
 // @match        https://pickem.overwatchleague.com/en-us/predictions/*
@@ -114,8 +114,8 @@ async function checkStats() {
 function savePredictions() {
     var savePredictions = $("button:contains('Save Predictions')");
 
-    for (i = 0; i < savePredictions.length; i++) {
-        savePredictions.eq(i).click();
+    for (var v = 0; v < savePredictions.length; v++) {
+        savePredictions.eq(v).click();
     }
 }
 
