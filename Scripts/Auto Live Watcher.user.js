@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://www.youtube.com/
-// @version      3.3.7
+// @version      3.3.8
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -27,7 +27,7 @@ var gotStreamLink = false;
 if (window.location.toString().indexOf('youtube.com') != -1) {
     waitForKeyElements(".ytd-two-column-browse-results-renderer", createLoopingInterval(youTubeMethod, 1000));
 } else if (window.location.toString().indexOf('drops/inventory') != -1) {
-    waitForKeyElements("[data-test-selector=drops-list__wrapper]", dropClicker);
+    waitForKeyElements(".inventory-max-width", dropClicker);
 } else if (window.location.toString().indexOf('/about') != -1) {
     waitForKeyElements(".channel-info-content", createLoopingInterval(twitchMethod, 1000));
 } else if (window.location.toString() == GM_getValue("watchingCategory", "")) {
@@ -149,7 +149,7 @@ function twitchMethod() {
 
 function dropClicker() {
     // Selector for claim button
-    var dropClaimButton = $('[data-test-selector="DropsCampaignInProgressRewardPresentation-claim-button"]');
+    var dropClaimButton = $("[data-a-target='tw-core-button-label-text']:contains('Claim Now')");
 
     for (var i = 0; i < dropClaimButton.length; i++) {
         // Click every claim button if they exist
