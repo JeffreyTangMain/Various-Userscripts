@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://www.youtube.com/
-// @version      3.3.8
+// @version      3.4.0
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -13,25 +13,35 @@
 // @grant         GM_registerMenuCommand
 // @run-at        document-start
 // @require http://code.jquery.com/jquery-3.4.1.min.js
-// @require https://cdn.jsdelivr.net/gh/CoeJoder/waitForKeyElements.js@v1.2/waitForKeyElements.js
 // ==/UserScript==
 // Documenting globals for JSHint to not throw an error for JQuery's $ function
-/* globals $ waitForKeyElements */
+/* globals $ */
 
 // Saves where you start this script so you can jump back to it later
 var startingChannel = window.location.href;
 var watchedStream = window.location.href;
+// Sets variable so drop clicker can refresh page after timeouts are done
+var dropClickerChecks = 0;
 // Only grab the stream URL once for redirect purposes
 var gotStreamLink = false;
 // Checks for the website you're currently on and runs the appropriate check
-if (window.location.toString().indexOf('youtube.com') != -1) {
-    waitForKeyElements(".ytd-two-column-browse-results-renderer", createLoopingInterval(youTubeMethod, 1000));
-} else if (window.location.toString().indexOf('drops/inventory') != -1) {
-    waitForKeyElements(".inventory-max-width", dropClicker);
-} else if (window.location.toString().indexOf('/about') != -1) {
-    waitForKeyElements(".channel-info-content", createLoopingInterval(twitchMethod, 1000));
-} else if (window.location.toString() == GM_getValue("watchingCategory", "")) {
-    waitForKeyElements("[data-test-selector=direectory-grid-grid-layout]", createLoopingInterval(twitchMethod, 1000));
+detectSite();
+
+async function detectSite() {
+    if (window.location.toString().indexOf('youtube.com') != -1) {
+        const elm = await waitForElm(".ytd-two-column-browse-results-renderer");
+        createLoopingInterval(youTubeMethod, 1000);
+    } else if (window.location.toString().indexOf('drops/inventory') != -1) {
+        const elm = await waitForElm(".inventory-page");
+        dropClicker();
+        createLoopingInterval(dropClicker, 60000);
+    } else if (window.location.toString().indexOf('/about') != -1) {
+        const elm = await waitForElm(".channel-info-content");
+        createLoopingInterval(twitchMethod, 1000);
+    } else if (window.location.toString() == GM_getValue("watchingCategory", "")) {
+        const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
+        createLoopingInterval(twitchMethod, 1000);
+    }
 }
 
 function createLoopingInterval(method, timer) {
@@ -138,7 +148,7 @@ function twitchMethod() {
 
     if (GM_getValue("watchingCategory", "") == "") {
         // Variable and check for leaving the channel so you can return to the about page
-        watchedStream = startingChannel.replace('/about','');
+        watchedStream = startingChannel.replace('/about', '');
     }
 
     if (window.location.toString() != startingChannel && window.location.toString() != watchedStream) {
@@ -148,6 +158,7 @@ function twitchMethod() {
 }
 
 function dropClicker() {
+    console.log("test" + dropClickerChecks);
     // Selector for claim button
     var dropClaimButton = $("[data-a-target='tw-core-button-label-text']:contains('Claim Now')");
 
@@ -158,14 +169,38 @@ function dropClicker() {
         }
     }
 
-    // Refresh after the timeout goes through and after clicking all the drop claims
-    var reloadStreams = setTimeout(returnToLive, 300000);
+    if (dropClickerChecks >= 5) {
+        // Refresh after the timeout goes through and after clicking all the drop claims
+        returnToLive();
+    } else {
+        dropClickerChecks++;
+    }
+}
+
+function waitForElm(selector) {
+    return new Promise(resolve => {
+        if (document.querySelector(selector)) {
+            return resolve(document.querySelector(selector));
+        }
+
+        const observer = new MutationObserver(mutations => {
+            if (document.querySelector(selector)) {
+                resolve(document.querySelector(selector));
+                observer.disconnect();
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    });
 }
 
 GM_registerMenuCommand("Watch Category", () => {
     // Only watches streams with drops enabled
     var dropsEnabledURL = window.location.href;
-    if(dropsEnabledURL.indexOf('?') != -1) {
+    if (dropsEnabledURL.indexOf('?') != -1) {
         dropsEnabledURL = dropsEnabledURL.substring(0, dropsEnabledURL.indexOf('?'));
     }
     dropsEnabledURL = dropsEnabledURL + "?tl=DropsEnabled";
