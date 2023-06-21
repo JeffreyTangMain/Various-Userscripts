@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://www.youtube.com/
-// @version      3.4.0
+// @version      3.4.1
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -158,7 +158,6 @@ function twitchMethod() {
 }
 
 function dropClicker() {
-    console.log("test" + dropClickerChecks);
     // Selector for claim button
     var dropClaimButton = $("[data-a-target='tw-core-button-label-text']:contains('Claim Now')");
 
