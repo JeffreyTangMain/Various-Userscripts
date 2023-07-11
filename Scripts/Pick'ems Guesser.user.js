@@ -1,17 +1,15 @@
 // ==UserScript==
 // @name         Pick'ems Guesser
-// @namespace    https://pickem.overwatchleague.com//
-// @version      1.0.1
+// @namespace    https://pickem.overwatchleague.com/
+// @version      2.0.0
 // @description  Automatically guesses Pick'ems for you based on the fan favorites.
 // @author       Main
-// @match        https://pickem.overwatchleague.com/en-us/predictions/*
-// @run-at        document-start
+// @match        https://pickem.overwatchleague.com/*
 // @grant        GM_registerMenuCommand
 // @require http://code.jquery.com/jquery-3.4.1.min.js
-// @require https://cdn.jsdelivr.net/gh/CoeJoder/waitForKeyElements.js@v1.2/waitForKeyElements.js
 // ==/UserScript==
 // Documenting globals for JSHint to not throw an error for JQuery's $ function
-/* globals $ waitForKeyElements */
+/* globals $ */
 
 GM.registerMenuCommand("Do Pick'ems", doPickems);
 
@@ -19,8 +17,10 @@ var checkingStats = true;
 var teamOffset = 0;
 var i = 0;
 var teamList = new Array();
+var totalPredictions = 0;
 
 async function doPickems() {
+    totalPredictions = $("button:contains('Save Predictions'):disabled").length;
     var plusIcons = $(".plus");
     checkingStats = true;
     teamOffset = 0;
@@ -28,7 +28,7 @@ async function doPickems() {
 
     for (i = 0; i < plusIcons.length; i += 2) {
         $(".plus").eq(i).parents(".matchup").find(".stats-wrapper").click();
-        const elm = await waitForElm('p.tw-font-display.tw-font-semibold.tw-text-2xl.tw-ml-auto');
+        const elm = await waitForElm('.team-logo');
 
         const stats = await checkStats();
 
@@ -39,6 +39,7 @@ async function doPickems() {
     var crystalBallLeagues = $(".region");
     var highestTeamScore = 0;
     var highestTeamIndex = 0;
+    var secondHighestTeamIndex = 0;
 
     for (var h = 0; h < crystalBallLeagues.length; h++) {
         for (i = 0; i < crystalBallLeagues.eq(h).find(".name").length; i++) {
@@ -46,38 +47,51 @@ async function doPickems() {
                 if (crystalBallLeagues.eq(h).find(".name").eq(i).text() == teamList[j]) {
                     if (highestTeamScore < teamList[j + 1]) {
                         highestTeamScore = teamList[j + 1];
+                        secondHighestTeamIndex = highestTeamIndex;
                         highestTeamIndex = i;
+                    } else if (teamList[secondHighestTeamIndex + 1] < teamList[j + 1]) {
+                        secondHighestTeamIndex = i;
                     }
                 }
             }
         }
 
         crystalBallLeagues.eq(h).find(".name").eq(highestTeamIndex).click();
+        crystalBallLeagues.eq(h).find(".name").eq(secondHighestTeamIndex).click();
         highestTeamScore = 0;
         highestTeamIndex = 0;
+        secondHighestTeamIndex = 0;
     }
 
-    savePredictions();
+    const waitFor = delay => new Promise(resolve => setTimeout(resolve, delay));
+
+    await waitFor(1000);
+
+    await savePredictions();
 }
 
 async function checkStats() {
+    const waitFor = delay => new Promise(resolve => setTimeout(resolve, delay));
+    await waitFor(100);
     var stats = $("p.tw-font-display.tw-font-semibold.tw-text-2xl.tw-ml-auto");
     var plusIcons = $(".plus");
+    var team1Name = $(".team-logo").eq(0).attr("alt").split(/(?=[A-Z])/);
+    var team2Name = $(".team-logo").eq(1).attr("alt").split(/(?=[A-Z])/);
 
-    if (!teamList.includes($(".team-logo").eq(0).attr("alt").split(/(?=[A-Z])/)[1])) {
-        teamList.push($(".team-logo").eq(0).attr("alt").split(/(?=[A-Z])/)[1]);
+    if (!teamList.includes(team1Name[team1Name.length - 2]) && !team1Name[0].includes("Contenders")) {
+        teamList.push(team1Name[team1Name.length - 2]);
         teamList.push(0);
     }
-    if (!teamList.includes($(".team-logo").eq(1).attr("alt").split(/(?=[A-Z])/)[1])) {
-        teamList.push($(".team-logo").eq(1).attr("alt").split(/(?=[A-Z])/)[1]);
+    if (!teamList.includes(team2Name[team2Name.length - 2]) && !team2Name[0].includes("Contenders")) {
+        teamList.push(team2Name[team2Name.length - 2]);
         teamList.push(0);
     }
 
     for (var j = 0; j < teamList.length; j += 2) {
-        if (teamList[j] == $(".team-logo").eq(0).attr("alt").split(/(?=[A-Z])/)[1]) {
-            teamList[j + 1] = teamList[j + 1] + parseInt($("p.tw-font-display.tw-font-semibold.tw-text-2xl.tw-ml-auto").eq(0).text());
-        } else if (teamList[j] == $(".team-logo").eq(1).attr("alt").split(/(?=[A-Z])/)[1]) {
-            teamList[j + 1] = teamList[j + 1] + parseInt($("p.tw-font-display.tw-font-semibold.tw-text-2xl.tw-ml-auto").eq(1).text());
+        if (teamList[j] == team1Name[team1Name.length - 2]) {
+            teamList[j + 1] = teamList[j + 1] + parseInt(stats.eq(0).text());
+        } else if (teamList[j] == team2Name[team2Name.length - 2]) {
+            teamList[j + 1] = teamList[j + 1] + parseInt(stats.eq(1).text());
         }
     }
 
@@ -86,19 +100,15 @@ async function checkStats() {
     }
 
     $(".dismiss").click();
+    await waitFor(100);
 
     teamOffset += i;
 
-    var timeout1 = setTimeout(clickPlus, 500, teamOffset, plusIcons);
-    var timeout2 = setTimeout(clickPlus, 1000, teamOffset, plusIcons);
-    var timeout3 = setTimeout(clickPlus, 1500, teamOffset, plusIcons);
-    var timeout4 = setTimeout(setFalse, 2000);
+    var currentPlus = $("button.plus:disabled").length;
+    await clickUntilPlusLimit(teamOffset, plusIcons, currentPlus);
+    checkingStats = false;
 
-    const waitFor = delay => new Promise(resolve => setTimeout(resolve, delay));
-
-    await waitFor(2500);
-
-    savePredictions();
+    await savePredictions();
 
     let myPromise = new Promise(function(myResolve, myReject) {
         if (checkingStats == false) {
@@ -111,20 +121,55 @@ async function checkStats() {
     return myPromise;
 }
 
-function savePredictions() {
+async function savePredictions() {
+    const waitFor = delay => new Promise(resolve => setTimeout(resolve, delay));
     var savePredictions = $("button:contains('Save Predictions')");
+    var currentSaved = $("button:contains('Save Predictions'):disabled").length;
 
     for (var v = 0; v < savePredictions.length; v++) {
         savePredictions.eq(v).click();
     }
+
+    while (currentSaved != totalPredictions) {
+        currentSaved = $("button:contains('Save Predictions'):disabled").length;
+        await waitFor(1000);
+    }
+
+    let myPromise = new Promise(function(myResolve, myReject) {
+        if (currentSaved == totalPredictions) {
+            myResolve("OK");
+        } else {
+            myReject("Error");
+        }
+    });
+
+    return myPromise;
 }
 
 function clickPlus(i, jQuery) {
     jQuery.eq(i).click();
 }
 
-function setFalse() {
-    checkingStats = false;
+async function clickUntilPlusLimit(i, jQuery, currentPlus) {
+    const waitFor = delay => new Promise(resolve => setTimeout(resolve, delay));
+    var clickTracker = 10;
+    var updatedPlus = $("button.plus:disabled").length;
+    while (updatedPlus == currentPlus && clickTracker > 0) {
+        clickPlus(i, jQuery);
+        await waitFor(100);
+        clickTracker--;
+        updatedPlus = $("button.plus:disabled").length;
+    }
+
+    let myPromise = new Promise(function(myResolve, myReject) {
+        if (updatedPlus != currentPlus || clickTracker <= 0) {
+            myResolve("OK");
+        } else {
+            myReject("Error");
+        }
+    });
+
+    return myPromise;
 }
 
 function waitForElm(selector) {
