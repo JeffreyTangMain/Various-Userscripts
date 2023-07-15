@@ -1,6 +1,6 @@
 # Various-Userscripts
 
-Auto Live Watcher: Checks for and watches any available YouTube or Twitch live streams automatically.
+Auto Live Watcher: Will watch YouTube streams, specific Twitch streams, or streams in a category with drops enabled automatically. Also can claim Twitch drops automatically. Will run on the "streams" page for YouTube, the "about" tab for Twitch, automatically on the drops page for Twitch, or if the script is manually run by clicking the "Watch Category" option while on a game category for Twitch. Refresh on these specific pages if the script is not running; the script will not run if you go onto these pages, only if you load these pages from a link or after refreshing on these pages.
 
 Auto-Expand Description: Automatically expands YouTube's description.
 
@@ -12,4 +12,4 @@ LoL Esports Redirector: Automatically sends you to the live page for lolesports.
 
 Pick'ems Guesser: Automatically does pick'ems for you based on fan trends. Open the pick'ems page and click the button in the userscript menu.
 
-Twitch Drop Claim: If you load the Twitch drop page, this extension will automatically pick it up for you.
+Twitch Drop Claim: Twitch drop claimer script. No longer maintained due to being superseded by the Auto Live Watcher script.
