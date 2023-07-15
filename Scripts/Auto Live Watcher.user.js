@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.4.5
+// @version      3.4.6
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -51,6 +51,10 @@ function createLoopingInterval(method, timer) {
     }
 }
 
+// Sets up boolean and timers for the connected drops check in youTubeMethod
+var timeoutCreated = false;
+var noDropsReload = undefined;
+
 function youTubeMethod() {
     // Absurd selector for the live icon in the stream list
     var liveButton = $("ytd-thumbnail-overlay-time-status-renderer.style-scope.ytd-thumbnail[overlay-style='LIVE']");
@@ -61,6 +65,17 @@ function youTubeMethod() {
 
     if (window.location.toString().indexOf('/watch') != -1) {
         clearTimeout(reloadStreams);
+        // Creates timer to reload stream if drops are not found
+        if (timeoutCreated == false) {
+            clearTimeout(noDropsReload);
+            noDropsReload = setTimeout(returnToLive, 300000);
+            timeoutCreated = true;
+        }
+        // Checks for drops to be connected
+        var connectedDrops = $("ytd-account-link-button-renderer:contains('Connected')");
+        if (connectedDrops.length != 0) {
+            clearTimeout(noDropsReload);
+        }
         if (GM_getValue("watchedStream", "") != window.location.href && gotStreamLink == false) {
             gotStreamLink = true;
             var firstViewing = setTimeout(returnToLive, 600000);
@@ -78,6 +93,7 @@ function youTubeMethod() {
     } else if (window.location.toString().indexOf('/streams') != -1) {
         startingChannel = window.location.href;
         gotStreamLink = false;
+        timeoutCreated = false;
         if (liveButton.length == 0 && typeof reloadStreams == 'undefined') {
             // If the button does not exist, wait some time before refreshing the stream page
             // Note: clicking into a live stream continues to render the streams page, making this not work if any other live streams are available
