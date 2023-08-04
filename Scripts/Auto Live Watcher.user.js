@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.4.6
+// @version      3.4.7
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -62,6 +62,8 @@ function youTubeMethod() {
     var streamEnd = $("div.html5-endscreen[style='']");
     // Click the live icon just in case the video becomes paused or falls behind
     var liveStatus = $(".ytp-live-badge:not(:disabled)");
+    // Click the full player play button in case the video doesn't start
+    var largePlayButton = $(".ytp-cued-thumbnail-overlay").not("[style*='display: none']").children(".ytp-large-play-button[aria-label='Play']");
 
     if (window.location.toString().indexOf('/watch') != -1) {
         clearTimeout(reloadStreams);
@@ -89,6 +91,8 @@ function youTubeMethod() {
         } else if (liveStatus.length != 0) {
             // Click the live indicator when paused or behind
             liveStatus.click();
+        } else if (largePlayButton.length != 0) {
+            largePlayButton.click();
         }
     } else if (window.location.toString().indexOf('/streams') != -1) {
         startingChannel = window.location.href;
