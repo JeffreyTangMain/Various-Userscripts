@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.5.0
+// @version      3.5.1
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -176,8 +176,6 @@ function twitchMethod() {
     }
 
     if (window.location.toString() != startingChannel && window.location.toString() != watchedStream) {
-        console.log("Test");
-        console.log(startingChannel + " " + watchedStream);
         returnToLive();
     }
 
