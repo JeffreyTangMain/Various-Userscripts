@@ -1,15 +1,14 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.4.7
+// @version      3.5.0
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
 // @match        https://www.twitch.tv/*/about
 // @match        https://www.twitch.tv/drops/inventory
 // @match        https://www.twitch.tv/directory/game/*
-// @grant         GM_setValue
-// @grant         GM_getValue
+// @match        https://www.twitch.tv/directory/game/*?tl=DropsEnabled
 // @grant         GM_registerMenuCommand
 // @require http://code.jquery.com/jquery-3.4.1.min.js
 // ==/UserScript==
@@ -23,6 +22,8 @@ var watchedStream = window.location.href;
 var dropClickerChecks = 0;
 // Only grab the stream URL once for redirect purposes
 var gotStreamLink = false;
+// Toggle to enable category watching mode
+var categoryWatching = false;
 // Checks for the website you're currently on and runs the appropriate check
 detectSite();
 
@@ -37,7 +38,7 @@ async function detectSite() {
     } else if (window.location.toString().indexOf('/about') != -1) {
         const elm = await waitForElm(".channel-info-content");
         createLoopingInterval(twitchMethod, 1000);
-    } else if (window.location.toString() == GM_getValue("watchingCategory", "")) {
+    } else if (window.location.toString().indexOf('?tl=DropsEnabled') != -1) {
         const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
         createLoopingInterval(twitchMethod, 1000);
     }
@@ -78,10 +79,10 @@ function youTubeMethod() {
         if (connectedDrops.length != 0) {
             clearTimeout(noDropsReload);
         }
-        if (GM_getValue("watchedStream", "") != window.location.href && gotStreamLink == false) {
+        if (watchedStream != window.location.href && gotStreamLink == false) {
             gotStreamLink = true;
             var firstViewing = setTimeout(returnToLive, 600000);
-            GM_setValue("watchedStream", window.location.href);
+            watchedStream = window.location.href;
         } else {
             gotStreamLink = true;
         }
@@ -109,7 +110,7 @@ function youTubeMethod() {
         }
     }
 
-    if (window.location.toString() != GM_getValue("watchedStream", window.location.href) && window.location.toString() != startingChannel && gotStreamLink == true) {
+    if (window.location.toString() != watchedStream && window.location.toString() != startingChannel && gotStreamLink == true) {
         // Return to stream if you move away
         returnToLive();
     }
@@ -131,7 +132,6 @@ function twitchMethod() {
 
     if (window.location.toString().indexOf('/about') != -1) {
         // Blank the category variable if you aren't using the specific button
-        GM_setValue("watchingCategory", "");
         // If on the about page to start, save the URL to return to later
         startingChannel = window.location.href;
         if (typeof liveIcon != 'undefined' && liveIcon.text() == "LIVE" && oneClick == false) {
@@ -140,9 +140,10 @@ function twitchMethod() {
             // If live, click the live icon to join stream
             liveIcon.click();
         }
-    } else if (window.location.toString() == GM_getValue("watchingCategory", "")) {
+    } else if (window.location.toString().indexOf('?tl=DropsEnabled') != -1) {
         // Go through live streams with drops and click the first one available
-        startingChannel = GM_getValue("watchingCategory", "");
+        categoryWatching = true;
+        startingChannel = window.location.href;
         var liveStreamList = $('.preview-card-image-link');
         for (var i = 0; i < liveStreamList.length; i++) {
             if (typeof liveStreamList[i] != 'undefined') {
@@ -169,12 +170,14 @@ function twitchMethod() {
         }
     }
 
-    if (GM_getValue("watchingCategory", "") == "") {
+    if (categoryWatching == false) {
         // Variable and check for leaving the channel so you can return to the about page
         watchedStream = startingChannel.replace('/about', '');
     }
 
     if (window.location.toString() != startingChannel && window.location.toString() != watchedStream) {
+        console.log("Test");
+        console.log(startingChannel + " " + watchedStream);
         returnToLive();
     }
 
@@ -226,9 +229,6 @@ GM_registerMenuCommand("Watch Category", () => {
         dropsEnabledURL = dropsEnabledURL.substring(0, dropsEnabledURL.indexOf('?'));
     }
     dropsEnabledURL = dropsEnabledURL + "?tl=DropsEnabled";
-
-    // Save drops enabled URL
-    GM_setValue("watchingCategory", dropsEnabledURL);
 
     // Immediately refresh page to get script running
     window.location.assign(dropsEnabledURL);
