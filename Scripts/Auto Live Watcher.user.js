@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.5.2
+// @version      3.5.3
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -24,7 +24,7 @@ var dropClickerChecks = 0;
 var gotStreamLink = false;
 // Toggle to enable category watching mode
 var categoryWatching = false;
-var dropIconLoaded = false;
+var infoLoaded = false;
 // Checks for the website you're currently on and runs the appropriate check
 detectSite();
 
@@ -177,11 +177,15 @@ function twitchMethod() {
     } else {
         // If script is watching a category, check for the drops enabled tag; if not present, return to stream list
         var dropIcon = $("[data-a-target='DropsEnabled']");
-        if(dropIcon.length != 0) {
+        var currentGame = $("[data-a-target='stream-game-link']").prop("href") + "?tl=DropsEnabled";
+        if(dropIcon.length != 0 && currentGame != "undefined?tl=DropsEnabled" && infoLoaded == false) {
             // Checks for the drops enabled tag to be loaded in the first place
-            dropIconLoaded = true;
-        } else if(dropIcon.length == 0 && dropIconLoaded == true) {
+            infoLoaded = true;
+        } else if(dropIcon.length == 0 && infoLoaded == true) {
             // After it's been loaded, if it disappears, reload the player
+            returnToLive();
+        } else if(currentGame != startingChannel && infoLoaded == true) {
+            // If the current game is not the game you started with, go back to the game list
             returnToLive();
         }
     }
