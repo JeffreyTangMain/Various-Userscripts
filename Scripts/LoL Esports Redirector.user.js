@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.4.0
+// @version      4.4.1
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
 // @match        https://lolesports.com/live/*
 // @match        https://www.youtube.com/embed/*lolesports.com*
+// @match        *://*.afreecatv.com/player/*/embed*
 // @grant GM_setValue
 // @grant GM_getValue
 // @run-at        document-start
@@ -16,13 +17,26 @@
 // Documenting globals for JSHint to not throw an error for JQuery's $ function
 /* globals $ waitForKeyElements */
 
-if(window.location.toString().indexOf('youtube.com/embed') != -1){
-    // If else statement that makes this script work for the embed or lolesports
+if(window.location.toString().indexOf('youtube.com/embed') != -1) {
+    // Handling for the YouTube embed autopausing
     waitForKeyElements("button.ytp-play-button", autoplayEmbed, false);
 
     function autoplayEmbed(){
         if($("button.ytp-play-button").attr("data-title-no-tooltip") != "Pause"){
             $("button.ytp-large-play-button").click();
+        }
+        return true;
+    }
+} else if (window.location.toString().indexOf('afreecatv.com') != -1) {
+    // Handling for the Afreecatv embed autopausing
+    waitForKeyElements("#afreecatv_player", autoplayEmbed, false);
+
+    function autoplayEmbed(){
+        if($(".nextvideo").length != 0) {
+            $(".nextvideo").click();
+        }
+        if($("button.play").not(".prev, .next").length != 0) {
+            $("button.play").not(".prev, .next").click();
         }
         return true;
     }
