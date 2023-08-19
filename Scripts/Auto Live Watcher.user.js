@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.5.3
+// @version      3.5.4
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
 // @match        https://www.twitch.tv/*/about
 // @match        https://www.twitch.tv/drops/inventory
-// @match        https://www.twitch.tv/directory/game/*
-// @match        https://www.twitch.tv/directory/game/*?tl=DropsEnabled
+// @match        https://www.twitch.tv/directory/*
+// @match        https://www.twitch.tv/directory/*?tl=DropsEnabled
 // @grant         GM_registerMenuCommand
 // @require http://code.jquery.com/jquery-3.4.1.min.js
 // ==/UserScript==
