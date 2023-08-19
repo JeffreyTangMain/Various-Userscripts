@@ -1,14 +1,13 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.5.4
+// @version      3.5.5
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
 // @match        https://www.twitch.tv/*/about
 // @match        https://www.twitch.tv/drops/inventory
-// @match        https://www.twitch.tv/directory/*
-// @match        https://www.twitch.tv/directory/*?tl=DropsEnabled
+// @match        https://www.twitch.tv/directory/*/*
 // @grant         GM_registerMenuCommand
 // @require http://code.jquery.com/jquery-3.4.1.min.js
 // ==/UserScript==
@@ -181,12 +180,15 @@ function twitchMethod() {
         if(dropIcon.length != 0 && currentGame != "undefined?tl=DropsEnabled" && infoLoaded == false) {
             // Checks for the drops enabled tag to be loaded in the first place
             infoLoaded = true;
-        } else if(dropIcon.length == 0 && infoLoaded == true) {
-            // After it's been loaded, if it disappears, reload the player
-            returnToLive();
-        } else if(currentGame != startingChannel && infoLoaded == true) {
-            // If the current game is not the game you started with, go back to the game list
-            returnToLive();
+        } else if (infoLoaded == true) {
+            if(dropIcon.length == 0) {
+                // After it's been loaded, if it disappears, reload the player
+                returnToLive();
+            } else if(currentGame.split("/")[currentGame.split("/").length - 1].toUpperCase() != startingChannel.split("/")[startingChannel.split("/").length - 1].toUpperCase()) {
+                // Splits the URL into parts by using / as the delimiter. Checks the last part of the split parts, which would be the game
+                // If the current game is not the game you started with, go back to the game list
+                returnToLive();
+            }
         }
     }
 
