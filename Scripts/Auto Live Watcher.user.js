@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.5.5
+// @version      3.5.6
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -24,6 +24,7 @@ var gotStreamLink = false;
 // Toggle to enable category watching mode
 var categoryWatching = false;
 var infoLoaded = false;
+var startingGame;
 // Checks for the website you're currently on and runs the appropriate check
 detectSite();
 
@@ -88,7 +89,7 @@ function youTubeMethod() {
         }
         if (streamEnd.length != 0) {
             // If the recommendation screen is showing, return to the stream list
-            returnToLive();
+            return returnToLive();
         } else if (liveStatus.length != 0) {
             // Click the live indicator when paused or behind
             liveStatus.click();
@@ -112,13 +113,14 @@ function youTubeMethod() {
 
     if (window.location.toString() != watchedStream && window.location.toString() != startingChannel && gotStreamLink == true) {
         // Return to stream if you move away
-        returnToLive();
+        return returnToLive();
     }
 }
 
 function returnToLive() {
     // Return to stream list of saved streamer
     window.location.assign(startingChannel);
+    return undefined;
 }
 
 function twitchMethod() {
@@ -157,7 +159,7 @@ function twitchMethod() {
         oneClick = false;
         if (typeof offlineText != 'undefined' && offlineText.text().includes("Follow and get notified when")) {
             // If not live, go back to the about page
-            returnToLive();
+            return returnToLive();
         } else if (typeof matureAcceptanceButton[0] != 'undefined') {
             // Clicks the mature acceptance button
             matureAcceptanceButton[0].click();
@@ -179,21 +181,22 @@ function twitchMethod() {
         var currentGame = $("[data-a-target='stream-game-link']").prop("href") + "?tl=DropsEnabled";
         if(dropIcon.length != 0 && currentGame != "undefined?tl=DropsEnabled" && infoLoaded == false) {
             // Checks for the drops enabled tag to be loaded in the first place
+            startingGame = currentGame;
             infoLoaded = true;
         } else if (infoLoaded == true) {
             if(dropIcon.length == 0) {
                 // After it's been loaded, if it disappears, reload the player
-                returnToLive();
-            } else if(currentGame.split("/")[currentGame.split("/").length - 1].toUpperCase() != startingChannel.split("/")[startingChannel.split("/").length - 1].toUpperCase()) {
+                return returnToLive();
+            } else if(currentGame != startingGame) {
                 // Splits the URL into parts by using / as the delimiter. Checks the last part of the split parts, which would be the game
                 // If the current game is not the game you started with, go back to the game list
-                returnToLive();
+                return returnToLive();
             }
         }
     }
 
     if (window.location.toString() != startingChannel && window.location.toString() != watchedStream) {
-        returnToLive();
+        return returnToLive();
     }
 
 }
@@ -211,7 +214,7 @@ function dropClicker() {
 
     if (dropClickerChecks >= 5) {
         // Refresh after the timeout goes through and after clicking all the drop claims
-        returnToLive();
+        return returnToLive();
     } else {
         dropClickerChecks++;
     }
