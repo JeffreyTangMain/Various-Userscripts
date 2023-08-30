@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.5.6
+// @version      3.5.7
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -212,7 +212,7 @@ function dropClicker() {
         }
     }
 
-    if (dropClickerChecks >= 5) {
+    if (dropClickerChecks >= 1) {
         // Refresh after the timeout goes through and after clicking all the drop claims
         return returnToLive();
     } else {
