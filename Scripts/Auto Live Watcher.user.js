@@ -219,7 +219,7 @@ function dropClicker() {
         }
     }
 
-    if (dropClickerChecks >= 1) {
+    if (dropClickerChecks >= 5) {
         // Refresh after the timeout goes through and after clicking all the drop claims
         return returnToLive();
     } else {
