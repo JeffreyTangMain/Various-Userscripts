@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.5.8
+// @version      3.6.0
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -19,8 +19,8 @@ var startingChannel = window.location.href;
 var watchedStream = window.location.href;
 // Sets variable so drop clicker can refresh page after timeouts are done
 var dropClickerChecks = 0;
-// Only grab the stream URL once for redirect purposes
-var gotStreamLink = false;
+// Checks if YouTube live stream has been clicked
+var clickChecker = false;
 // Toggle to enable category watching mode
 var categoryWatching = false;
 var infoLoaded = false;
@@ -64,11 +64,12 @@ function youTubeMethod() {
     var streamEnd = $("div.html5-endscreen[style='']");
     // Click the live icon just in case the video becomes paused or falls behind
     var liveStatus = $(".ytp-live-badge:not(:disabled)");
-    // Click the full player play button in case the video doesn't start
-    var largePlayButton = $(".ytp-cued-thumbnail-overlay").not("[style*='display: none']").children(".ytp-large-play-button[aria-label='Play']");
+    // Click the pause button in case the video doesn't start or is paused
+    var pauseButton = $(".ytp-play-button[data-title-no-tooltip='Play']");
 
     if (window.location.toString().indexOf('/watch') != -1) {
         clearTimeout(reloadStreams);
+        clickChecker = true;
         // Creates timer to reload stream if drops are not found
         if (timeoutCreated == false) {
             clearTimeout(noDropsReload);
@@ -80,12 +81,13 @@ function youTubeMethod() {
         if (connectedDrops.length != 0) {
             clearTimeout(noDropsReload);
         }
-        if (watchedStream != window.location.href && gotStreamLink == false) {
-            gotStreamLink = true;
-            var firstViewing = setTimeout(returnToLive, 600000);
+        if (sessionStorage.getItem("watchedStream") != window.location.href) {
+            // Refreshes the page after a delay to stop watching VODs
+            if(sessionStorage.getItem("watchedStream") != null) {
+                var firstViewing = setTimeout(returnToLive, 600000);
+            }
+            sessionStorage.setItem("watchedStream", window.location.href);
             watchedStream = window.location.href;
-        } else {
-            gotStreamLink = true;
         }
         if (streamEnd.length != 0) {
             // If the recommendation screen is showing, return to the stream list
@@ -93,12 +95,13 @@ function youTubeMethod() {
         } else if (liveStatus.length != 0) {
             // Click the live indicator when paused or behind
             liveStatus.click();
-        } else if (largePlayButton.length != 0) {
-            largePlayButton.click();
+        } else if (pauseButton.length != 0) {
+            // Unpauses the video and starts the video if it didn't autoplay
+            pauseButton.click();
         }
     } else if (window.location.toString().indexOf('/streams') != -1) {
         startingChannel = window.location.href;
-        gotStreamLink = false;
+        watchedStream = sessionStorage.getItem("watchedStream");
         timeoutCreated = false;
         if (liveButton.length == 0 && typeof reloadStreams == 'undefined') {
             // If the button does not exist, wait some time before refreshing the stream page
@@ -111,7 +114,7 @@ function youTubeMethod() {
         }
     }
 
-    if (window.location.toString() != watchedStream && window.location.toString() != startingChannel && gotStreamLink == true) {
+    if (window.location.toString() != watchedStream && window.location.toString() != startingChannel && clickChecker == true) {
         // Return to stream if you move away
         return returnToLive();
     }
