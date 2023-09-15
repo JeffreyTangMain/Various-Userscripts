@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.6.1
+// @version      3.6.2
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -25,6 +25,8 @@ var clickChecker = false;
 var categoryWatching = false;
 var infoLoaded = false;
 var startingGame;
+// Timer variable to wait a certain amount of seconds before clicking on the live button on a stream to prevent redirects, which will unload the script
+var twitchLiveTimer = 0;
 // Checks for the website you're currently on and runs the appropriate check
 detectSite();
 
@@ -37,7 +39,7 @@ async function detectSite() {
         dropClicker();
         createLoopingInterval(dropClicker, 60000);
     } else if (window.location.toString().indexOf('/about') != -1) {
-        const elm = await waitForElm(".channel-info-content");
+        const elm = await waitForElm('div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
         createLoopingInterval(twitchMethod, 1000);
     } else if (window.location.toString().indexOf('?tl=DropsEnabled') != -1) {
         const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
@@ -127,23 +129,18 @@ function returnToLive() {
 function twitchMethod() {
     // Check for live icon below channel profile picture
     var liveIcon = $('div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
+    // Will only click the live icon as long as there's no viewer count, because the viewer count only shows up when the stream is in focus
+    var viewerCount = $('[data-a-target="animated-channel-viewers-count"]');
     var offlineText = $('[data-test-selector="follow-panel-overlay"] [class^="CoreText"]');
     var pauseButton = $('[data-a-target="player-play-pause-button"]');
     var matureAcceptanceButton = $('[data-a-target="player-overlay-mature-accept"]');
     var contentWarningButton = $('[data-a-target="content-classification-gate-overlay-start-watching-button"]');
     var reloadPlayerButton = $("div[data-a-target='tw-core-button-label-text']:contains('Click Here to Reload Player')");
-    var oneClick = false;
 
     if (window.location.toString().indexOf('/about') != -1) {
         // Blank the category variable if you aren't using the specific button
         // If on the about page to start, save the URL to return to later
         startingChannel = window.location.href;
-        if (typeof liveIcon != 'undefined' && liveIcon.text() == "LIVE" && oneClick == false) {
-            // Toggle the oneClick variable to only click once in case the redirect takes too much time
-            oneClick = true;
-            // If live, click the live icon to join stream
-            liveIcon.click();
-        }
     } else if (window.location.toString().indexOf('?tl=DropsEnabled') != -1) {
         // Go through live streams with drops and click the first one available
         categoryWatching = true;
@@ -157,8 +154,6 @@ function twitchMethod() {
             }
         }
     } else {
-        // Reset the oneClick variable to work if you return to the about page or leave for any reason
-        oneClick = false;
         if (typeof offlineText != 'undefined' && offlineText.text().includes("Follow and get notified when")) {
             // If not live, go back to the about page
             return returnToLive();
@@ -175,6 +170,29 @@ function twitchMethod() {
             // Unpauses the video
             pauseButton[0].click();
         }
+    }
+
+    if (typeof liveIcon != 'undefined' && liveIcon.text().includes("LIVE")) {
+        if (twitchLiveTimer >= 60 && viewerCount.length == 0) {
+            if(sessionStorage.getItem("twitchFirstViewing") != startingChannel) {
+                // On the first time a stream goes live, refresh the page after some seconds to make sure the stream doesn't redirect
+                sessionStorage.setItem("twitchFirstViewing", startingChannel);
+                return returnToLive();
+            } else {
+                // Only goes into this check if the sessionStorage says the stream has been seen before, so the player must've refreshed
+                // If live, click the live icon to join stream
+                liveIcon.click();
+            }
+        } else if (viewerCount.length != 0) {
+            // If the live button exists and the viewerCount is != 0, then we must be watching a stream, so the first viewing storage must be reset for the stream ending or redirects
+            sessionStorage.setItem("twitchFirstViewing", "");
+        } else {
+            // Before everything, the live timer needs to be incremented for some seconds in a row before the above code can run
+            twitchLiveTimer++;
+        }
+    } else {
+        // If the live button disappears for any reason, the timer will reset
+        twitchLiveTimer = 0;
     }
 
     if (categoryWatching == false) {
