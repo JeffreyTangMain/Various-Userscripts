@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.6.2
+// @version      3.6.3
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -58,6 +58,8 @@ function createLoopingInterval(method, timer) {
 // Sets up boolean and timers for the connected drops check in youTubeMethod
 var timeoutCreated = false;
 var noDropsReload = undefined;
+var reloadStreams = null;
+var firstViewing = null;
 
 function youTubeMethod() {
     // Absurd selector for the live icon in the stream list
@@ -70,10 +72,15 @@ function youTubeMethod() {
     var pauseButton = $(".ytp-play-button[data-title-no-tooltip='Play']");
 
     if (window.location.toString().indexOf('/watch') != -1) {
-        clearTimeout(reloadStreams);
+        if(reloadStreams != null) {
+            console.log("YouTube: clearTimeout(reloadStreams);");
+            clearTimeout(reloadStreams);
+            reloadStreams = null;
+        }
         clickChecker = true;
         // Creates timer to reload stream if drops are not found
         if (timeoutCreated == false) {
+            console.log("YouTube: noDropsReload = setTimeout(returnToLive, 300000);");
             clearTimeout(noDropsReload);
             noDropsReload = setTimeout(returnToLive, 300000);
             timeoutCreated = true;
@@ -81,16 +88,19 @@ function youTubeMethod() {
         // Checks for drops to be connected
         var connectedDrops = $("ytd-account-link-button-renderer:contains('Connected')");
         if (connectedDrops.length != 0) {
+            console.log("YouTube: clearTimeout(noDropsReload);");
             clearTimeout(noDropsReload);
         }
         if (sessionStorage.getItem("watchedStream") != window.location.href) {
             // Refreshes the page after a delay to stop watching VODs
-            var firstViewing = setTimeout(returnToLive, 600000);
+            console.log("YouTube: firstViewing = setTimeout(returnToLive, 10000);");
+            firstViewing = setTimeout(returnToLive, 10000);
             sessionStorage.setItem("watchedStream", window.location.href);
             watchedStream = window.location.href;
         }
         if (streamEnd.length != 0) {
             // If the recommendation screen is showing, return to the stream list
+            console.log("YouTube: streamEnd.length != 0");
             return returnToLive();
         } else if (liveStatus.length != 0) {
             // Click the live indicator when paused or behind
@@ -103,11 +113,12 @@ function youTubeMethod() {
         startingChannel = window.location.href;
         watchedStream = sessionStorage.getItem("watchedStream");
         timeoutCreated = false;
-        if (liveButton.length == 0 && typeof reloadStreams == 'undefined') {
+        if (liveButton.length == 0 && reloadStreams == null) {
             // If the button does not exist, wait some time before refreshing the stream page
             // Note: clicking into a live stream continues to render the streams page, making this not work if any other live streams are available
+            console.log("YouTube: reloadStreams = setTimeout(returnToLive, 10000);");
             clearTimeout(reloadStreams);
-            var reloadStreams = setTimeout(returnToLive, 300000);
+            reloadStreams = setTimeout(returnToLive, 10000);
         } else if (liveButton.length != 0) {
             // Click button if on the live stream page
             liveButton[0].click();
@@ -116,6 +127,7 @@ function youTubeMethod() {
 
     if (window.location.href != watchedStream && window.location.href != startingChannel && clickChecker == true) {
         // Return to stream if you move away
+        console.log("YouTube: window.location.href != watchedStream && window.location.href != startingChannel && clickChecker == true");
         return returnToLive();
     }
 }
@@ -154,8 +166,9 @@ function twitchMethod() {
             }
         }
     } else {
-        if (typeof offlineText != 'undefined' && offlineText.text().includes("Follow and get notified when")) {
+        if (typeof offlineText != 'undefined' && offlineText.text().includes('Follow and get notified when')) {
             // If not live, go back to the about page
+            console.log("Twitch: typeof offlineText != 'undefined' && offlineText.text().includes('Follow and get notified when')");
             return returnToLive();
         } else if (typeof matureAcceptanceButton[0] != 'undefined') {
             // Clicks the mature acceptance button
@@ -174,9 +187,10 @@ function twitchMethod() {
 
     if (typeof liveIcon != 'undefined' && liveIcon.text().includes("LIVE")) {
         if (twitchLiveTimer >= 60 && viewerCount.length == 0) {
-            if(sessionStorage.getItem("twitchFirstViewing") != startingChannel) {
+            if(sessionStorage.getItem('twitchFirstViewing') != startingChannel) {
                 // On the first time a stream goes live, refresh the page after some seconds to make sure the stream doesn't redirect
-                sessionStorage.setItem("twitchFirstViewing", startingChannel);
+                console.log("Twitch: sessionStorage.getItem('twitchFirstViewing') != startingChannel");
+                sessionStorage.setItem('twitchFirstViewing', startingChannel);
                 return returnToLive();
             } else {
                 // Only goes into this check if the sessionStorage says the stream has been seen before, so the player must've refreshed
@@ -209,16 +223,19 @@ function twitchMethod() {
         } else if (infoLoaded == true) {
             if(dropIcon.length == 0) {
                 // After it's been loaded, if it disappears, reload the player
+                console.log("Twitch: dropIcon.length == 0");
                 return returnToLive();
             } else if(currentGame != startingGame) {
                 // Splits the URL into parts by using / as the delimiter. Checks the last part of the split parts, which would be the game
                 // If the current game is not the game you started with, go back to the game list
+                console.log("Twitch: currentGame != startingGame");
                 return returnToLive();
             }
         }
     }
 
     if (window.location.toString() != startingChannel && window.location.toString() != watchedStream) {
+        console.log("Twitch: window.location.toString() != startingChannel && window.location.toString() != watchedStream");
         return returnToLive();
     }
 
@@ -237,6 +254,7 @@ function dropClicker() {
 
     if (dropClickerChecks >= 5) {
         // Refresh after the timeout goes through and after clicking all the drop claims
+        console.log("Twitch: dropClickerChecks >= 5");
         return returnToLive();
     } else {
         dropClickerChecks++;
