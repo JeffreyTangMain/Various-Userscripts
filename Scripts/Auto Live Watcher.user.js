@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.6.4
+// @version      3.6.5
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -98,8 +98,8 @@ function youTubeMethod() {
         }
         if (sessionStorage.getItem("watchedStream") != window.location.href) {
             // Refreshes the page after a delay to stop watching VODs
-            console.log("YouTube: firstViewing = setTimeout(returnToLive, 10000);");
-            firstViewing = setTimeout(returnToLive, 10000);
+            console.log("YouTube: firstViewing = setTimeout(returnToLive, 600000);");
+            firstViewing = setTimeout(returnToLive, 600000);
             sessionStorage.setItem("watchedStream", window.location.href);
             watchedStream = window.location.href;
         }
@@ -121,9 +121,9 @@ function youTubeMethod() {
         if (liveButton.length == 0 && reloadStreams == null) {
             // If the button does not exist, wait some time before refreshing the stream page
             // Note: clicking into a live stream continues to render the streams page, making this not work if any other live streams are available
-            console.log("YouTube: reloadStreams = setTimeout(returnToLive, 10000);");
+            console.log("YouTube: reloadStreams = setTimeout(returnToLive, 300000);");
             clearTimeout(reloadStreams);
-            reloadStreams = setTimeout(returnToLive, 10000);
+            reloadStreams = setTimeout(returnToLive, 300000);
         } else if (liveButton.length != 0) {
             // Click button if on the live stream page
             liveButton[0].click();
