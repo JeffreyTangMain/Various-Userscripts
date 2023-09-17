@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.6.3
+// @version      3.6.4
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -28,21 +28,26 @@ var startingGame;
 // Timer variable to wait a certain amount of seconds before clicking on the live button on a stream to prevent redirects, which will unload the script
 var twitchLiveTimer = 0;
 // Checks for the website you're currently on and runs the appropriate check
+console.log("Auto Live Watcher Userscript Loaded");
 detectSite();
 
 async function detectSite() {
     if (window.location.toString().indexOf('youtube.com') != -1) {
         const elm = await waitForElm(".ytd-two-column-browse-results-renderer");
+        console.log("youtube.com detected");
         createLoopingInterval(youTubeMethod, 1000);
     } else if (window.location.toString().indexOf('drops/inventory') != -1) {
         const elm = await waitForElm(".inventory-page");
+        console.log("drops/inventory detected");
         dropClicker();
         createLoopingInterval(dropClicker, 60000);
     } else if (window.location.toString().indexOf('/about') != -1) {
         const elm = await waitForElm('div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
+        console.log("/about detected");
         createLoopingInterval(twitchMethod, 1000);
     } else if (window.location.toString().indexOf('?tl=DropsEnabled') != -1) {
         const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
+        console.log("?tl=DropsEnabled detected");
         createLoopingInterval(twitchMethod, 1000);
     }
 }
@@ -252,9 +257,9 @@ function dropClicker() {
         }
     }
 
-    if (dropClickerChecks >= 5) {
+    if (dropClickerChecks >= 3) {
         // Refresh after the timeout goes through and after clicking all the drop claims
-        console.log("Twitch: dropClickerChecks >= 5");
+        console.log("Twitch: dropClickerChecks >= 3");
         return returnToLive();
     } else {
         dropClickerChecks++;
