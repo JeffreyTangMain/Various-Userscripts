@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.6.5
+// @version      3.6.6
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -27,44 +27,35 @@ var infoLoaded = false;
 var startingGame;
 // Timer variable to wait a certain amount of seconds before clicking on the live button on a stream to prevent redirects, which will unload the script
 var twitchLiveTimer = 0;
+// Sets up boolean and timers for the connected drops check in youTubeMethod
+var timeoutCreated = false;
+var noDropsReload = null;
+var reloadStreams = null;
+var firstViewing = null;
 // Checks for the website you're currently on and runs the appropriate check
-console.log("Auto Live Watcher Userscript Loaded");
+console.log("ALWU: Auto Live Watcher Userscript Loaded");
 detectSite();
 
 async function detectSite() {
     if (window.location.toString().indexOf('youtube.com') != -1) {
         const elm = await waitForElm(".ytd-two-column-browse-results-renderer");
-        console.log("youtube.com detected");
+        console.log("ALWU: youtube.com detected");
         createLoopingInterval(youTubeMethod, 1000);
     } else if (window.location.toString().indexOf('drops/inventory') != -1) {
         const elm = await waitForElm(".inventory-page");
-        console.log("drops/inventory detected");
+        console.log("ALWU: drops/inventory detected");
         dropClicker();
         createLoopingInterval(dropClicker, 60000);
     } else if (window.location.toString().indexOf('/about') != -1) {
         const elm = await waitForElm('div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
-        console.log("/about detected");
+        console.log("ALWU: /about detected");
         createLoopingInterval(twitchMethod, 1000);
     } else if (window.location.toString().indexOf('?tl=DropsEnabled') != -1) {
         const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
-        console.log("?tl=DropsEnabled detected");
+        console.log("ALWU: ?tl=DropsEnabled detected");
         createLoopingInterval(twitchMethod, 1000);
     }
 }
-
-function createLoopingInterval(method, timer) {
-    // Attempts to stop multiple loops from existing at once
-    if (typeof loopingInterval == 'undefined') {
-        clearInterval(loopingInterval);
-        var loopingInterval = setInterval(method, timer);
-    }
-}
-
-// Sets up boolean and timers for the connected drops check in youTubeMethod
-var timeoutCreated = false;
-var noDropsReload = undefined;
-var reloadStreams = null;
-var firstViewing = null;
 
 function youTubeMethod() {
     // Absurd selector for the live icon in the stream list
@@ -78,23 +69,22 @@ function youTubeMethod() {
 
     if (window.location.toString().indexOf('/watch') != -1) {
         if(reloadStreams != null) {
-            console.log("YouTube: clearTimeout(reloadStreams);");
-            clearTimeout(reloadStreams);
-            reloadStreams = null;
+            console.log("YouTube: resetTimeout(reloadStreams);");
+            reloadStreams = resetTimeout(reloadStreams);
         }
         clickChecker = true;
         // Creates timer to reload stream if drops are not found
-        if (timeoutCreated == false) {
+        if (timeoutCreated == false && noDropsReload == null) {
             console.log("YouTube: noDropsReload = setTimeout(returnToLive, 300000);");
-            clearTimeout(noDropsReload);
+            noDropsReload = resetTimeout(noDropsReload);
             noDropsReload = setTimeout(returnToLive, 300000);
             timeoutCreated = true;
         }
         // Checks for drops to be connected
         var connectedDrops = $("ytd-account-link-button-renderer:contains('Connected')");
-        if (connectedDrops.length != 0) {
-            console.log("YouTube: clearTimeout(noDropsReload);");
-            clearTimeout(noDropsReload);
+        if (noDropsReload != null && connectedDrops.length != 0) {
+            console.log("YouTube: resetTimeout(noDropsReload);");
+            noDropsReload = resetTimeout(noDropsReload);
         }
         if (sessionStorage.getItem("watchedStream") != window.location.href) {
             // Refreshes the page after a delay to stop watching VODs
@@ -122,7 +112,7 @@ function youTubeMethod() {
             // If the button does not exist, wait some time before refreshing the stream page
             // Note: clicking into a live stream continues to render the streams page, making this not work if any other live streams are available
             console.log("YouTube: reloadStreams = setTimeout(returnToLive, 300000);");
-            clearTimeout(reloadStreams);
+            reloadStreams = resetTimeout(reloadStreams);
             reloadStreams = setTimeout(returnToLive, 300000);
         } else if (liveButton.length != 0) {
             // Click button if on the live stream page
@@ -135,12 +125,6 @@ function youTubeMethod() {
         console.log("YouTube: window.location.href != watchedStream && window.location.href != startingChannel && clickChecker == true");
         return returnToLive();
     }
-}
-
-function returnToLive() {
-    // Return to stream list of saved streamer
-    window.location.assign(startingChannel);
-    return undefined;
 }
 
 function twitchMethod() {
@@ -264,6 +248,26 @@ function dropClicker() {
     } else {
         dropClickerChecks++;
     }
+}
+
+function createLoopingInterval(method, timer) {
+    // Attempts to stop multiple loops from existing at once
+    if (typeof loopingInterval == 'undefined') {
+        clearInterval(loopingInterval);
+        var loopingInterval = setInterval(method, timer);
+    }
+}
+
+function resetTimeout(timer) {
+    // Clears a timer, returns null for that timer to be reset to null
+    clearTimeout(timer);
+    return null;
+}
+
+function returnToLive() {
+    // Return to stream list of saved streamer
+    window.location.assign(startingChannel);
+    return undefined;
 }
 
 function waitForElm(selector) {
