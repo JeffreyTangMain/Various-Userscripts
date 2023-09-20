@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.6.6
+// @version      3.6.7
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -82,7 +82,7 @@ function youTubeMethod() {
         }
         // Checks for drops to be connected
         var connectedDrops = $("ytd-account-link-button-renderer:contains('Connected')");
-        if (noDropsReload != null && connectedDrops.length != 0) {
+        if (noDropsReload != null && connectedDrops.length > 0) {
             console.log("YouTube: resetTimeout(noDropsReload);");
             noDropsReload = resetTimeout(noDropsReload);
         }
@@ -93,14 +93,14 @@ function youTubeMethod() {
             sessionStorage.setItem("watchedStream", window.location.href);
             watchedStream = window.location.href;
         }
-        if (streamEnd.length != 0) {
+        if (streamEnd.length > 0) {
             // If the recommendation screen is showing, return to the stream list
-            console.log("YouTube: streamEnd.length != 0");
+            console.log("YouTube: streamEnd.length > 0");
             return returnToLive();
-        } else if (liveStatus.length != 0) {
+        } else if (liveStatus.length > 0) {
             // Click the live indicator when paused or behind
             liveStatus.click();
-        } else if (pauseButton.length != 0) {
+        } else if (pauseButton.length > 0) {
             // Unpauses the video and starts the video if it didn't autoplay
             pauseButton.click();
         }
@@ -114,7 +114,7 @@ function youTubeMethod() {
             console.log("YouTube: reloadStreams = setTimeout(returnToLive, 300000);");
             reloadStreams = resetTimeout(reloadStreams);
             reloadStreams = setTimeout(returnToLive, 300000);
-        } else if (liveButton.length != 0) {
+        } else if (liveButton.length > 0) {
             // Click button if on the live stream page
             liveButton[0].click();
         }
@@ -137,6 +137,7 @@ function twitchMethod() {
     var matureAcceptanceButton = $('[data-a-target="player-overlay-mature-accept"]');
     var contentWarningButton = $('[data-a-target="content-classification-gate-overlay-start-watching-button"]');
     var reloadPlayerButton = $("div[data-a-target='tw-core-button-label-text']:contains('Click Here to Reload Player')");
+    var raidPopup = $("[data-test-selector='raid-banner']");
 
     if (window.location.toString().indexOf('/about') != -1) {
         // Blank the category variable if you aren't using the specific button
@@ -186,7 +187,7 @@ function twitchMethod() {
                 // If live, click the live icon to join stream
                 liveIcon.click();
             }
-        } else if (viewerCount.length != 0) {
+        } else if (viewerCount.length > 0) {
             // If the live button exists and the viewerCount is != 0, then we must be watching a stream, so the first viewing storage must be reset for the stream ending or redirects
             sessionStorage.setItem("twitchFirstViewing", "");
         } else {
@@ -205,7 +206,7 @@ function twitchMethod() {
         // If script is watching a category, check for the drops enabled tag; if not present, return to stream list
         var dropIcon = $("[data-a-target='DropsEnabled']");
         var currentGame = $("[data-a-target='stream-game-link']").prop("href") + "?tl=DropsEnabled";
-        if(dropIcon.length != 0 && currentGame != "undefined?tl=DropsEnabled" && infoLoaded == false) {
+        if(dropIcon.length > 0 && currentGame != "undefined?tl=DropsEnabled" && infoLoaded == false) {
             // Checks for the drops enabled tag to be loaded in the first place
             startingGame = currentGame;
             infoLoaded = true;
@@ -226,8 +227,10 @@ function twitchMethod() {
     if (window.location.toString() != startingChannel && window.location.toString() != watchedStream) {
         console.log("Twitch: window.location.toString() != startingChannel && window.location.toString() != watchedStream");
         return returnToLive();
+    } else if (raidPopup.length > 0) {
+        console.log("Twitch: raidPopup.length > 0");
+        return returnToLive();
     }
-
 }
 
 function dropClicker() {
