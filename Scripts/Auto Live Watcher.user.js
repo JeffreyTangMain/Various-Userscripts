@@ -1,13 +1,11 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.6.7
+// @version      3.6.8
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
-// @match        https://www.twitch.tv/*/about
-// @match        https://www.twitch.tv/drops/inventory
-// @match        https://www.twitch.tv/directory/*/*
+// @match        https://www.twitch.tv/*
 // @grant         GM_registerMenuCommand
 // @require http://code.jquery.com/jquery-3.4.1.min.js
 // ==/UserScript==
@@ -37,23 +35,31 @@ console.log("ALWU: Auto Live Watcher Userscript Loaded");
 detectSite();
 
 async function detectSite() {
-    if (window.location.toString().indexOf('youtube.com') != -1) {
+    if (window.location.toString().indexOf('youtube.com') != -1 && window.location.toString().indexOf('/streams') != -1 ) {
         const elm = await waitForElm(".ytd-two-column-browse-results-renderer");
-        console.log("ALWU: youtube.com detected");
+        console.log("ALWU: YouTube /streams detected");
         createLoopingInterval(youTubeMethod, 1000);
-    } else if (window.location.toString().indexOf('drops/inventory') != -1) {
-        const elm = await waitForElm(".inventory-page");
-        console.log("ALWU: drops/inventory detected");
-        dropClicker();
-        createLoopingInterval(dropClicker, 60000);
-    } else if (window.location.toString().indexOf('/about') != -1) {
-        const elm = await waitForElm('div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
-        console.log("ALWU: /about detected");
-        createLoopingInterval(twitchMethod, 1000);
-    } else if (window.location.toString().indexOf('?tl=DropsEnabled') != -1) {
-        const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
-        console.log("ALWU: ?tl=DropsEnabled detected");
-        createLoopingInterval(twitchMethod, 1000);
+    } else if (window.location.toString().indexOf('twitch.tv') != -1) {
+        if (window.location.toString().indexOf('drops/inventory') != -1) {
+            const elm = await waitForElm(".inventory-page");
+            console.log("ALWU: Twitch drops/inventory detected");
+            dropClicker();
+            createLoopingInterval(dropClicker, 60000);
+        } else if (window.location.toString().indexOf('/about') != -1) {
+            const elm = await waitForElm('div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
+            console.log("ALWU: Twitch /about detected");
+            createLoopingInterval(twitchMethod, 1000);
+        } else if (window.location.toString().indexOf('?tl=DropsEnabled') != -1) {
+            const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
+            console.log("ALWU: Twitch ?tl=DropsEnabled detected");
+            createLoopingInterval(twitchMethod, 1000);
+        } else {
+            if(sessionStorage.getItem('twitchStartingChannel') != null) {
+                console.log("ALWU: sessionStorage.getItem('twitchStartingChannel') != null");
+                startingChannel = sessionStorage.getItem('twitchStartingChannel');
+                return returnToLive();
+            }
+        }
     }
 }
 
@@ -82,7 +88,7 @@ function youTubeMethod() {
         }
         // Checks for drops to be connected
         var connectedDrops = $("ytd-account-link-button-renderer:contains('Connected')");
-        if (noDropsReload != null && connectedDrops.length > 0) {
+        if (noDropsReload != null && connectedDrops.length != 0) {
             console.log("YouTube: resetTimeout(noDropsReload);");
             noDropsReload = resetTimeout(noDropsReload);
         }
@@ -93,14 +99,14 @@ function youTubeMethod() {
             sessionStorage.setItem("watchedStream", window.location.href);
             watchedStream = window.location.href;
         }
-        if (streamEnd.length > 0) {
+        if (streamEnd.length != 0) {
             // If the recommendation screen is showing, return to the stream list
-            console.log("YouTube: streamEnd.length > 0");
+            console.log("YouTube: streamEnd.length != 0");
             return returnToLive();
-        } else if (liveStatus.length > 0) {
+        } else if (liveStatus.length != 0) {
             // Click the live indicator when paused or behind
             liveStatus.click();
-        } else if (pauseButton.length > 0) {
+        } else if (pauseButton.length != 0) {
             // Unpauses the video and starts the video if it didn't autoplay
             pauseButton.click();
         }
@@ -114,7 +120,7 @@ function youTubeMethod() {
             console.log("YouTube: reloadStreams = setTimeout(returnToLive, 300000);");
             reloadStreams = resetTimeout(reloadStreams);
             reloadStreams = setTimeout(returnToLive, 300000);
-        } else if (liveButton.length > 0) {
+        } else if (liveButton.length != 0) {
             // Click button if on the live stream page
             liveButton[0].click();
         }
@@ -143,6 +149,7 @@ function twitchMethod() {
         // Blank the category variable if you aren't using the specific button
         // If on the about page to start, save the URL to return to later
         startingChannel = window.location.href;
+        sessionStorage.setItem('twitchStartingChannel', startingChannel);
     } else if (window.location.toString().indexOf('?tl=DropsEnabled') != -1) {
         // Go through live streams with drops and click the first one available
         categoryWatching = true;
@@ -187,7 +194,7 @@ function twitchMethod() {
                 // If live, click the live icon to join stream
                 liveIcon.click();
             }
-        } else if (viewerCount.length > 0) {
+        } else if (viewerCount.length != 0) {
             // If the live button exists and the viewerCount is != 0, then we must be watching a stream, so the first viewing storage must be reset for the stream ending or redirects
             sessionStorage.setItem("twitchFirstViewing", "");
         } else {
@@ -206,7 +213,7 @@ function twitchMethod() {
         // If script is watching a category, check for the drops enabled tag; if not present, return to stream list
         var dropIcon = $("[data-a-target='DropsEnabled']");
         var currentGame = $("[data-a-target='stream-game-link']").prop("href") + "?tl=DropsEnabled";
-        if(dropIcon.length > 0 && currentGame != "undefined?tl=DropsEnabled" && infoLoaded == false) {
+        if(dropIcon.length != 0 && currentGame != "undefined?tl=DropsEnabled" && infoLoaded == false) {
             // Checks for the drops enabled tag to be loaded in the first place
             startingGame = currentGame;
             infoLoaded = true;
