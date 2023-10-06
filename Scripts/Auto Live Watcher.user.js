@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.6.8
+// @version      3.6.9
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -36,22 +36,22 @@ detectSite();
 
 async function detectSite() {
     if (window.location.toString().indexOf('youtube.com') != -1 && window.location.toString().indexOf('/streams') != -1 ) {
-        const elm = await waitForElm(".ytd-two-column-browse-results-renderer");
         console.log("ALWU: YouTube /streams detected");
+        const elm = await waitForElm(".ytd-two-column-browse-results-renderer");
         createLoopingInterval(youTubeMethod, 1000);
     } else if (window.location.toString().indexOf('twitch.tv') != -1) {
         if (window.location.toString().indexOf('drops/inventory') != -1) {
-            const elm = await waitForElm(".inventory-page");
             console.log("ALWU: Twitch drops/inventory detected");
+            const elm = await waitForElm(".inventory-page");
             dropClicker();
             createLoopingInterval(dropClicker, 60000);
         } else if (window.location.toString().indexOf('/about') != -1) {
-            const elm = await waitForElm('div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
             console.log("ALWU: Twitch /about detected");
+            const elm = await waitForElm('div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
             createLoopingInterval(twitchMethod, 1000);
         } else if (window.location.toString().indexOf('?tl=DropsEnabled') != -1) {
-            const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
             console.log("ALWU: Twitch ?tl=DropsEnabled detected");
+            const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
             createLoopingInterval(twitchMethod, 1000);
         } else {
             if(sessionStorage.getItem('twitchStartingChannel') != null) {
@@ -189,11 +189,12 @@ function twitchMethod() {
                 console.log("Twitch: sessionStorage.getItem('twitchFirstViewing') != startingChannel");
                 sessionStorage.setItem('twitchFirstViewing', startingChannel);
                 return returnToLive();
-            } else {
+            } else if (twitchLiveTimer % 5 == 0) {
                 // Only goes into this check if the sessionStorage says the stream has been seen before, so the player must've refreshed
                 // If live, click the live icon to join stream
                 liveIcon.click();
             }
+            twitchLiveTimer++;
         } else if (viewerCount.length != 0) {
             // If the live button exists and the viewerCount is != 0, then we must be watching a stream, so the first viewing storage must be reset for the stream ending or redirects
             sessionStorage.setItem("twitchFirstViewing", "");
