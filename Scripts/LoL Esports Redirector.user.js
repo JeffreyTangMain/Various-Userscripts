@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.4.1
+// @version      4.4.2
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -45,6 +45,7 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
     var containerLoaded = false;
     var tempString = '';
     var delayRefreshTimer = 300000;
+    var heartbeatStopCounter = 0;
 
     var oldLog = unsafeWindow.console.log;
 
@@ -55,18 +56,29 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
                 // arguments[4] includes the heartbeater status update
                 // Refreshes after a delay if the RewardsStatusInformer's heartbeat has stopped
                 // Note: heartbeater stops if the embed is muted and in the background, make sure you don't mute it in the embed
-                window.location.assign('https://lolesports.com/schedule');
+                if(heartbeatStopCounter < 2) {
+                    // Tracks the number of stopped heartbeats, refreshes if heartbeat is dead for some minutes
+                    heartbeatStopCounter++;
+                } else {
+                    console.log("LOLER: arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('stopped')");
+                    window.location.assign('https://lolesports.com/schedule');
+                }
+            } else if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('heartbeating')){
+                heartbeatStopCounter = 0;
             }
             else if(arguments[2].includes('RewardsStatusInformer') && !(arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
                 // Checks if any rewards are enabled
                 if(GM_getValue("liveLinkNumber", 0) < GM_getValue("liveGameCount", 1)) {
+                    console.log("LOLER: GM_getValue('liveLinkNumber', 0) < GM_getValue('liveGameCount', 1)");
                     window.location.assign('https://lolesports.com/schedule');
                 } else if((Date.now() - GM_getValue("currentMinute", 0)) > delayRefreshTimer){
+                    console.log('LOLER: (Date.now() - GM_getValue("currentMinute", 0)) > delayRefreshTimer');
                     window.location.assign('https://lolesports.com/schedule');
                 }
             }
             // Checks if the video player has ended, which indicates a VOD
             else if(arguments[2].includes('VideoPlayer') && arguments[5].includes('ended')){
+                console.log("LOLER: arguments[2].includes('VideoPlayer') && arguments[5].includes('ended')");
                 window.location.assign('https://lolesports.com/schedule');
             }
             // Checks if the video player is playing
@@ -79,6 +91,7 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
             }
             // Check for an erroring WatchLive, which is another indicator of the stream ending
             else if(arguments[2].includes('WatchLive') && arguments[4].length == undefined){
+                console.log("LOLER: arguments[2].includes('WatchLive') && arguments[4].length == undefined");
                 window.location.assign('https://lolesports.com/schedule');
             }
         } catch (error) {
@@ -96,7 +109,10 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
     function mainMethod(){
         // A refresh function that runs when the live button is undefined and the page is not at the live section
         // This should refresh when there are no live games to check for new ones every refresh
-        liveClicker(function(){setTimeout(function(){window.location.assign('https://lolesports.com/schedule')}, delayRefreshTimer)});
+        liveClicker(function(){setTimeout(function(){
+            console.log("LOLER: mainMethod liveClicker");
+            window.location.assign('https://lolesports.com/schedule');
+        }, delayRefreshTimer)});
     }
 
     function liveClicker(method, loop){
@@ -157,11 +173,15 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
                     // Resolves issues if the live stream is clicked out of at any time
                     // Will return to the schedule page if clicked into a page with no live button
                     // If there is a live button, meaning you're on the schedule, it will click it, remove the old loop, and then continue normal operation
-                    liveClicker(function(){window.location.assign('https://lolesports.com/schedule')}, rewardCheck);
+                    liveClicker(function(){
+                        console.log("LOLER: window.location.toString().indexOf(redirectPathCheck) == -1");
+                        window.location.assign('https://lolesports.com/schedule');
+                    }, rewardCheck);
                 } else if((rewardsEnabled == true && rewardsIcon != '#5ABBD4') || (manualTimer > timerThreshold && (containerLoaded == false || rewardsEnabled == false))){
                     // The first check is if rewards were enabled at some point in the past and aren't enabled currently
                     // The second check is a backup wait for some seconds that will refresh the page if the video still hasn't loaded
                     // #5ABBD4 is the fill color when rewards are working, #DE2F2F is the fill color when rewards aren't
+                    console.log("LOLER: (rewardsEnabled == true && rewardsIcon != '#5ABBD4') || (manualTimer > timerThreshold && (containerLoaded == false || rewardsEnabled == false))");
                     window.location.assign('https://lolesports.com/schedule');
                 } else if(document.readyState == 'complete'){
                     // Should click the close button on any drop popups
