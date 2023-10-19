@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.4.3
+// @version      4.4.4
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -64,7 +64,7 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
 
                     // Will also refresh if too much time has passed ever since receiving a heartbeat stop
                     if(heartbeatStoppedReload == null) {
-                        console.log("heartbeatStoppedReload = setTimeout(returnToLive, 300000);");
+                        console.log("LOLER: heartbeatStoppedReload = setTimeout(returnToLive, 300000);");
                         heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);
                         heartbeatStoppedReload = setTimeout(returnToLive, 300000);
                     }
@@ -73,7 +73,7 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
                     return returnToLive();
                 }
             } else if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('heartbeating')){
-                console.log("heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);");
+                console.log("LOLER: heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);");
                 heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);
                 heartbeatStopCounter = 0;
             }
