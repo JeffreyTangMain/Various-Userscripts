@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://lolesports.com/
-// @version      4.4.4
+// @version      4.4.5
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -72,7 +72,7 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
                     console.log("LOLER: arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('stopped')");
                     return returnToLive();
                 }
-            } else if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('heartbeating')){
+            } else if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('heartbeating') && heartbeatStoppedReload != null){
                 console.log("LOLER: heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);");
                 heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);
                 heartbeatStopCounter = 0;
