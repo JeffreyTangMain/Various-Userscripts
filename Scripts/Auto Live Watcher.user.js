@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.6.10
+// @version      3.6.11
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -49,8 +49,8 @@ async function detectSite() {
             console.log("ALWU: Twitch /about detected");
             const elm = await waitForElm('div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
             createLoopingInterval(twitchMethod, 1000);
-        } else if (window.location.toString().indexOf('?tl=DropsEnabled') != -1) {
-            console.log("ALWU: Twitch ?tl=DropsEnabled detected");
+        } else if (window.location.toString().indexOf('?filter=drops') != -1) {
+            console.log("ALWU: Twitch ?filter=drops detected");
             const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
             createLoopingInterval(twitchMethod, 1000);
         } else {
@@ -150,7 +150,7 @@ function twitchMethod() {
         // If on the about page to start, save the URL to return to later
         startingChannel = window.location.href;
         sessionStorage.setItem('twitchStartingChannel', startingChannel);
-    } else if (window.location.toString().indexOf('?tl=DropsEnabled') != -1) {
+    } else if (window.location.toString().indexOf('?filter=drops') != -1) {
         // Go through live streams with drops and click the first one available
         categoryWatching = true;
         startingChannel = window.location.href;
@@ -214,8 +214,8 @@ function twitchMethod() {
     } else {
         // If script is watching a category, check for the drops enabled tag; if not present, return to stream list
         var dropIcon = $("[data-a-target='DropsEnabled']");
-        var currentGame = $("[data-a-target='stream-game-link']").prop("href") + "?tl=DropsEnabled";
-        if(dropIcon.length != 0 && currentGame != "undefined?tl=DropsEnabled" && infoLoaded == false) {
+        var currentGame = $("[data-a-target='stream-game-link']").prop("href") + "?filter=drops";
+        if(dropIcon.length != 0 && currentGame != "undefined?filter=drops" && infoLoaded == false) {
             // Checks for the drops enabled tag to be loaded in the first place
             startingGame = currentGame;
             infoLoaded = true;
@@ -308,7 +308,7 @@ GM_registerMenuCommand("Watch Category", () => {
     if (dropsEnabledURL.indexOf('?') != -1) {
         dropsEnabledURL = dropsEnabledURL.substring(0, dropsEnabledURL.indexOf('?'));
     }
-    dropsEnabledURL = dropsEnabledURL + "?tl=DropsEnabled";
+    dropsEnabledURL = dropsEnabledURL + "?filter=drops";
 
     // Immediately refresh page to get script running
     window.location.assign(dropsEnabledURL);
