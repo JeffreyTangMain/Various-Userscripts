@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.6.11
+// @version      3.7.0
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
 // @match        https://www.twitch.tv/*
 // @grant         GM_registerMenuCommand
+// @grant         GM_addStyle
 // @require http://code.jquery.com/jquery-3.4.1.min.js
 // ==/UserScript==
 // Documenting globals for JSHint to not throw an error for JQuery's $ function
@@ -31,34 +32,48 @@ var noDropsReload = null;
 var reloadStreams = null;
 var firstViewing = null;
 // Checks for the website you're currently on and runs the appropriate check
-console.log("ALWU: Auto Live Watcher Userscript Loaded");
+scriptConfirmLaunch("ALWU: Auto Live Watcher Userscript Loaded");
+
+// Style for the popup
+GM_addStyle(
+    '#ALWUBoxConfirm {' +
+    'background: black;' +
+    'border: 1px solid red;' +
+    'padding: 4px;' +
+    'position: absolute;' +
+    'top: 8px; left: 8px;' +
+    'max-width: 400px;' +
+    'z-index: 999999;' +
+    '}'
+);
+
 detectSite();
 
 async function detectSite() {
     if (window.location.toString().indexOf('youtube.com') != -1 && window.location.toString().indexOf('/streams') != -1 ) {
-        console.log("ALWU: YouTube /streams detected");
+        scriptConfirmLaunch("ALWU: YouTube /streams detected");
         const elm = await waitForElm(".ytd-two-column-browse-results-renderer");
         createLoopingInterval(youTubeMethod, 1000);
     } else if (window.location.toString().indexOf('twitch.tv') != -1) {
         if (window.location.toString().indexOf('drops/inventory') != -1) {
-            console.log("ALWU: Twitch drops/inventory detected");
+            scriptConfirmLaunch("ALWU: Twitch drops/inventory detected");
             const elm = await waitForElm(".inventory-page");
             dropClicker();
             createLoopingInterval(dropClicker, 60000);
         } else if (window.location.toString().indexOf('/about') != -1) {
-            console.log("ALWU: Twitch /about detected");
+            scriptConfirmLaunch("ALWU: Twitch /about detected");
             const elm = await waitForElm('div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
             createLoopingInterval(twitchMethod, 1000);
         } else if (window.location.toString().indexOf('?filter=drops') != -1) {
-            console.log("ALWU: Twitch ?filter=drops detected");
+            scriptConfirmLaunch("ALWU: Twitch ?filter=drops detected");
             const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
             createLoopingInterval(twitchMethod, 1000);
+        } else if(sessionStorage.getItem('twitchStartingChannel') != null) {
+            scriptConfirmLaunch("ALWU: sessionStorage.getItem('twitchStartingChannel') != null");
+            startingChannel = sessionStorage.getItem('twitchStartingChannel');
+            return returnToLive();
         } else {
-            if(sessionStorage.getItem('twitchStartingChannel') != null) {
-                console.log("ALWU: sessionStorage.getItem('twitchStartingChannel') != null");
-                startingChannel = sessionStorage.getItem('twitchStartingChannel');
-                return returnToLive();
-            }
+            removeConfirmPopup();
         }
     }
 }
@@ -75,13 +90,13 @@ function youTubeMethod() {
 
     if (window.location.toString().indexOf('/watch') != -1) {
         if(reloadStreams != null) {
-            console.log("YouTube: resetTimeout(reloadStreams);");
+            scriptConfirmLaunch("YouTube: resetTimeout(reloadStreams);");
             reloadStreams = resetTimeout(reloadStreams);
         }
         clickChecker = true;
         // Creates timer to reload stream if drops are not found
         if (timeoutCreated == false && noDropsReload == null) {
-            console.log("YouTube: noDropsReload = setTimeout(returnToLive, 300000);");
+            scriptConfirmLaunch("YouTube: noDropsReload = setTimeout(returnToLive, 300000);");
             noDropsReload = resetTimeout(noDropsReload);
             noDropsReload = setTimeout(returnToLive, 300000);
             timeoutCreated = true;
@@ -89,19 +104,19 @@ function youTubeMethod() {
         // Checks for drops to be connected
         var connectedDrops = $("ytd-account-link-button-renderer:contains('Connected')");
         if (noDropsReload != null && connectedDrops.length != 0) {
-            console.log("YouTube: resetTimeout(noDropsReload);");
+            scriptConfirmLaunch("YouTube: resetTimeout(noDropsReload);");
             noDropsReload = resetTimeout(noDropsReload);
         }
         if (sessionStorage.getItem("watchedStream") != window.location.href) {
             // Refreshes the page after a delay to stop watching VODs
-            console.log("YouTube: firstViewing = setTimeout(returnToLive, 600000);");
+            scriptConfirmLaunch("YouTube: firstViewing = setTimeout(returnToLive, 600000);");
             firstViewing = setTimeout(returnToLive, 600000);
             sessionStorage.setItem("watchedStream", window.location.href);
             watchedStream = window.location.href;
         }
         if (streamEnd.length != 0) {
             // If the recommendation screen is showing, return to the stream list
-            console.log("YouTube: streamEnd.length != 0");
+            scriptConfirmLaunch("YouTube: streamEnd.length != 0");
             return returnToLive();
         } else if (liveStatus.length != 0) {
             // Click the live indicator when paused or behind
@@ -117,7 +132,7 @@ function youTubeMethod() {
         if (liveButton.length == 0 && reloadStreams == null) {
             // If the button does not exist, wait some time before refreshing the stream page
             // Note: clicking into a live stream continues to render the streams page, making this not work if any other live streams are available
-            console.log("YouTube: reloadStreams = setTimeout(returnToLive, 300000);");
+            scriptConfirmLaunch("YouTube: reloadStreams = setTimeout(returnToLive, 300000);");
             reloadStreams = resetTimeout(reloadStreams);
             reloadStreams = setTimeout(returnToLive, 300000);
         } else if (liveButton.length != 0) {
@@ -128,7 +143,7 @@ function youTubeMethod() {
 
     if (window.location.href != watchedStream && window.location.href != startingChannel && clickChecker == true) {
         // Return to stream if you move away
-        console.log("YouTube: window.location.href != watchedStream && window.location.href != startingChannel && clickChecker == true");
+        scriptConfirmLaunch("YouTube: window.location.href != watchedStream && window.location.href != startingChannel && clickChecker == true");
         return returnToLive();
     }
 }
@@ -166,7 +181,7 @@ function twitchMethod() {
     } else {
         if (typeof offlineText != 'undefined' && offlineText.text().includes('Follow and get notified when')) {
             // If not live, go back to the about page
-            console.log("Twitch: typeof offlineText != 'undefined' && offlineText.text().includes('Follow and get notified when')");
+            scriptConfirmLaunch("Twitch: typeof offlineText != 'undefined' && offlineText.text().includes('Follow and get notified when')");
             return returnToLive();
         } else if (typeof matureAcceptanceButton[0] != 'undefined') {
             // Clicks the mature acceptance button
@@ -187,7 +202,7 @@ function twitchMethod() {
         if (twitchLiveTimer >= 60 && viewerCount.length == 0) {
             if(sessionStorage.getItem('twitchFirstViewing') != startingChannel) {
                 // On the first time a stream goes live, refresh the page after some seconds to make sure the stream doesn't redirect
-                console.log("Twitch: sessionStorage.getItem('twitchFirstViewing') != startingChannel");
+                scriptConfirmLaunch("Twitch: sessionStorage.getItem('twitchFirstViewing') != startingChannel");
                 sessionStorage.setItem('twitchFirstViewing', startingChannel);
                 return returnToLive();
             } else if (twitchLiveTimer % 5 == 0) {
@@ -222,22 +237,22 @@ function twitchMethod() {
         } else if (infoLoaded == true) {
             if(dropIcon.length == 0) {
                 // After it's been loaded, if it disappears, reload the player
-                console.log("Twitch: dropIcon.length == 0");
+                scriptConfirmLaunch("Twitch: dropIcon.length == 0");
                 return returnToLive();
             } else if(currentGame != startingGame) {
                 // Splits the URL into parts by using / as the delimiter. Checks the last part of the split parts, which would be the game
                 // If the current game is not the game you started with, go back to the game list
-                console.log("Twitch: currentGame != startingGame");
+                scriptConfirmLaunch("Twitch: currentGame != startingGame");
                 return returnToLive();
             }
         }
     }
 
     if (window.location.toString() != startingChannel && window.location.toString() != watchedStream) {
-        console.log("Twitch: window.location.toString() != startingChannel && window.location.toString() != watchedStream");
+        scriptConfirmLaunch("Twitch: window.location.toString() != startingChannel && window.location.toString() != watchedStream");
         return returnToLive();
     } else if (raidPopup.length > 0) {
-        console.log("Twitch: raidPopup.length > 0");
+        scriptConfirmLaunch("Twitch: raidPopup.length > 0");
         return returnToLive();
     }
 }
@@ -255,7 +270,7 @@ function dropClicker() {
 
     if (dropClickerChecks >= 3) {
         // Refresh after the timeout goes through and after clicking all the drop claims
-        console.log("Twitch: dropClickerChecks >= 3");
+        scriptConfirmLaunch("Twitch: dropClickerChecks >= 3");
         return returnToLive();
     } else {
         dropClickerChecks++;
@@ -300,6 +315,25 @@ function waitForElm(selector) {
             subtree: true
         });
     });
+}
+
+function scriptConfirmLaunch(string) {
+    // Removes any existing boxes, creates a new box with the requested text in the top left corner that can be removed with a click
+    removeConfirmPopup();
+    console.log(string);
+    var box = document.createElement('div');
+    box.id = 'ALWUBoxConfirm';
+    box.textContent = string;
+    document.body.appendChild(box);
+    box.addEventListener('click', function () {
+        box.parentNode.removeChild(box);
+    }, true);
+}
+
+function removeConfirmPopup() {
+    if($("#ALWUBoxConfirm").length != 0) {
+        $("#ALWUBoxConfirm").remove();
+    }
 }
 
 GM_registerMenuCommand("Watch Category", () => {
