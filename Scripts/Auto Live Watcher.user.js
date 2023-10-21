@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.1
+// @version      3.7.2
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -38,6 +38,8 @@ scriptConfirmLaunch("ALWU: Auto Live Watcher Userscript Loaded");
 GM_addStyle(
     '#ALWUBoxConfirm {' +
     'background: black;' +
+    'color: white;' +
+    'font-size: max(1em, 18px);' +
     'border: 1px solid red;' +
     'padding: 4px;' +
     'position: absolute;' +
