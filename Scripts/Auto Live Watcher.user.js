@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.0
+// @version      3.7.1
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -258,15 +258,12 @@ function twitchMethod() {
 }
 
 function dropClicker() {
-    // Selector for claim button
-    var dropClaimButton = $("[data-a-target='tw-core-button-label-text']:contains('Claim Now')");
-
-    for (var i = 0; i < dropClaimButton.length; i++) {
-        // Click every claim button if they exist
-        if (typeof dropClaimButton[i] != 'undefined') {
-            dropClaimButton[i].click();
+    // Clicks every claim now button
+    $("[data-a-target='tw-core-button-label-text']:contains('Claim Now')").each(
+        function() {
+            $(this).click();
         }
-    }
+    );
 
     if (dropClickerChecks >= 3) {
         // Refresh after the timeout goes through and after clicking all the drop claims
@@ -318,12 +315,13 @@ function waitForElm(selector) {
 }
 
 function scriptConfirmLaunch(string) {
+    var current = new Date();
     // Removes any existing boxes, creates a new box with the requested text in the top left corner that can be removed with a click
     removeConfirmPopup();
     console.log(string);
     var box = document.createElement('div');
     box.id = 'ALWUBoxConfirm';
-    box.textContent = string;
+    box.textContent = string + " " + current.getHours() + ":" + current.getMinutes();
     document.body.appendChild(box);
     box.addEventListener('click', function () {
         box.parentNode.removeChild(box);
