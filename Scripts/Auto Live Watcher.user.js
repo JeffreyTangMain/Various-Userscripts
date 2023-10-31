@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.2
+// @version      3.7.3
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -23,7 +23,6 @@ var clickChecker = false;
 // Toggle to enable category watching mode
 var categoryWatching = false;
 var infoLoaded = false;
-var startingGame;
 // Timer variable to wait a certain amount of seconds before clicking on the live button on a stream to prevent redirects, which will unload the script
 var twitchLiveTimer = 0;
 // Sets up boolean and timers for the connected drops check in youTubeMethod
@@ -31,6 +30,7 @@ var timeoutCreated = false;
 var noDropsReload = null;
 var reloadStreams = null;
 var firstViewing = null;
+var noDropStreamsAvailable = null;
 // Checks for the website you're currently on and runs the appropriate check
 scriptConfirmLaunch("ALWU: Auto Live Watcher Userscript Loaded");
 
@@ -173,11 +173,19 @@ function twitchMethod() {
         startingChannel = window.location.href;
         sessionStorage.setItem('twitchStartingChannel', startingChannel);
         var liveStreamList = $('.preview-card-image-link');
-        for (var i = 0; i < liveStreamList.length; i++) {
-            if (typeof liveStreamList[i] != 'undefined') {
-                watchedStream = "https://www.twitch.tv" + liveStreamList.eq(i).attr('href');
-                liveStreamList.eq(i).children().click();
-                break;
+
+        if(liveStreamList.length == 0 && noDropStreamsAvailable == null) {
+            noDropStreamsAvailable = setTimeout(returnToLive, 300000);
+        } else if (liveStreamList.length != 0) {
+            if(noDropStreamsAvailable != null) {
+                resetTimeout(noDropStreamsAvailable);
+            }
+            for (var i = 0; i < liveStreamList.length; i++) {
+                if (typeof liveStreamList[i] != 'undefined') {
+                    watchedStream = "https://www.twitch.tv" + liveStreamList.eq(i).attr('href');
+                    liveStreamList.eq(i).children().click();
+                    break;
+                }
             }
         }
     } else {
@@ -229,22 +237,16 @@ function twitchMethod() {
         // Variable and check for leaving the channel so you can return to the about page
         watchedStream = startingChannel.replace('/about', '');
     } else {
-        // If script is watching a category, check for the drops enabled tag; if not present, return to stream list
-        var dropIcon = $("[data-a-target='DropsEnabled']");
+        // If script is watching a category, check for the right game; if not present, return to stream list
         var currentGame = $("[data-a-target='stream-game-link']").prop("href") + "?filter=drops";
-        if(dropIcon.length != 0 && currentGame != "undefined?filter=drops" && infoLoaded == false) {
+        if(currentGame != "undefined?filter=drops" && infoLoaded == false) {
             // Checks for the drops enabled tag to be loaded in the first place
-            startingGame = currentGame;
             infoLoaded = true;
         } else if (infoLoaded == true) {
-            if(dropIcon.length == 0) {
-                // After it's been loaded, if it disappears, reload the player
-                scriptConfirmLaunch("Twitch: dropIcon.length == 0");
-                return returnToLive();
-            } else if(currentGame != startingGame) {
+            if(currentGame != startingChannel) {
                 // Splits the URL into parts by using / as the delimiter. Checks the last part of the split parts, which would be the game
                 // If the current game is not the game you started with, go back to the game list
-                scriptConfirmLaunch("Twitch: currentGame != startingGame");
+                scriptConfirmLaunch("Twitch: currentGame != startingChannel");
                 return returnToLive();
             }
         }
