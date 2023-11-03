@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.3
+// @version      3.7.4
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
 // @match        https://www.twitch.tv/*
 // @grant         GM_registerMenuCommand
 // @grant         GM_addStyle
+// @grant        GM_info
 // @require http://code.jquery.com/jquery-3.4.1.min.js
 // ==/UserScript==
 // Documenting globals for JSHint to not throw an error for JQuery's $ function
@@ -23,6 +24,7 @@ var clickChecker = false;
 // Toggle to enable category watching mode
 var categoryWatching = false;
 var infoLoaded = false;
+var tagCount = null;
 // Timer variable to wait a certain amount of seconds before clicking on the live button on a stream to prevent redirects, which will unload the script
 var twitchLiveTimer = 0;
 // Sets up boolean and timers for the connected drops check in youTubeMethod
@@ -66,8 +68,8 @@ async function detectSite() {
             scriptConfirmLaunch("ALWU: Twitch /about detected");
             const elm = await waitForElm('div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
             createLoopingInterval(twitchMethod, 1000);
-        } else if (window.location.toString().indexOf('?filter=drops') != -1) {
-            scriptConfirmLaunch("ALWU: Twitch ?filter=drops detected");
+        } else if (window.location.toString().indexOf('?filter=drops&sort=VIEWER_COUNT') != -1) {
+            scriptConfirmLaunch("ALWU: Twitch ?filter=drops&sort=VIEWER_COUNT detected");
             const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
             createLoopingInterval(twitchMethod, 1000);
         } else if(sessionStorage.getItem('twitchStartingChannel') != null) {
@@ -167,7 +169,7 @@ function twitchMethod() {
         // If on the about page to start, save the URL to return to later
         startingChannel = window.location.href;
         sessionStorage.setItem('twitchStartingChannel', startingChannel);
-    } else if (window.location.toString().indexOf('?filter=drops') != -1) {
+    } else if (window.location.toString().indexOf('?filter=drops&sort=VIEWER_COUNT') != -1) {
         // Go through live streams with drops and click the first one available
         categoryWatching = true;
         startingChannel = window.location.href;
@@ -238,12 +240,20 @@ function twitchMethod() {
         watchedStream = startingChannel.replace('/about', '');
     } else {
         // If script is watching a category, check for the right game; if not present, return to stream list
-        var currentGame = $("[data-a-target='stream-game-link']").prop("href") + "?filter=drops";
-        if(currentGame != "undefined?filter=drops" && infoLoaded == false) {
+        var currentGame = $("[data-a-target='stream-game-link']").prop("href") + "?filter=drops&sort=VIEWER_COUNT";
+        var currentTagCount = $('[aria-label^="Tag"]').length;
+
+        if(currentGame != "undefined?filter=drops&sort=VIEWER_COUNT" && infoLoaded == false) {
             // Checks for the drops enabled tag to be loaded in the first place
             infoLoaded = true;
         } else if (infoLoaded == true) {
-            if(currentGame != startingChannel) {
+            if(tagCount == null) {
+                tagCount = currentTagCount;
+            } else if(tagCount != currentTagCount) {
+                // If the amount of tags change, maybe it's a channel with no more drops, so return to the drops list
+                scriptConfirmLaunch("Twitch: tagCount != currentTagCount");
+                return returnToLive();
+            } else if(currentGame != startingChannel) {
                 // Splits the URL into parts by using / as the delimiter. Checks the last part of the split parts, which would be the game
                 // If the current game is not the game you started with, go back to the game list
                 scriptConfirmLaunch("Twitch: currentGame != startingChannel");
@@ -325,7 +335,7 @@ function scriptConfirmLaunch(string) {
     console.log(string);
     var box = document.createElement('div');
     box.id = 'ALWUBoxConfirm';
-    box.textContent = string + " " + current.getHours() + ":" + current.getMinutes();
+    box.textContent = string + " | " + current.getHours() + ":" + current.getMinutes() + ", v" + GM_info.script.version;
     document.body.appendChild(box);
     box.addEventListener('click', function () {
         box.parentNode.removeChild(box);
@@ -344,7 +354,7 @@ GM_registerMenuCommand("Watch Category", () => {
     if (dropsEnabledURL.indexOf('?') != -1) {
         dropsEnabledURL = dropsEnabledURL.substring(0, dropsEnabledURL.indexOf('?'));
     }
-    dropsEnabledURL = dropsEnabledURL + "?filter=drops";
+    dropsEnabledURL = dropsEnabledURL + "?filter=drops&sort=VIEWER_COUNT";
 
     // Immediately refresh page to get script running
     window.location.assign(dropsEnabledURL);
