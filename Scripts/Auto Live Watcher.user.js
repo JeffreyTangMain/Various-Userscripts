@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.4
+// @version      3.7.5
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -57,20 +57,24 @@ async function detectSite() {
     if (window.location.toString().indexOf('youtube.com') != -1 && window.location.toString().indexOf('/streams') != -1 ) {
         scriptConfirmLaunch("ALWU: YouTube /streams detected");
         const elm = await waitForElm(".ytd-two-column-browse-results-renderer");
+        scriptConfirmLaunch("ALWU: await .ytd-two-column-browse-results-renderer");
         createLoopingInterval(youTubeMethod, 1000);
     } else if (window.location.toString().indexOf('twitch.tv') != -1) {
         if (window.location.toString().indexOf('drops/inventory') != -1) {
             scriptConfirmLaunch("ALWU: Twitch drops/inventory detected");
             const elm = await waitForElm(".inventory-page");
+            scriptConfirmLaunch("ALWU: await .inventory-page");
             dropClicker();
             createLoopingInterval(dropClicker, 60000);
         } else if (window.location.toString().indexOf('/about') != -1) {
             scriptConfirmLaunch("ALWU: Twitch /about detected");
             const elm = await waitForElm('div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
+            scriptConfirmLaunch("ALWU: await div[class*='ChannelStatusTextIndicator'] [class^='CoreText']");
             createLoopingInterval(twitchMethod, 1000);
         } else if (window.location.toString().indexOf('?filter=drops&sort=VIEWER_COUNT') != -1) {
             scriptConfirmLaunch("ALWU: Twitch ?filter=drops&sort=VIEWER_COUNT detected");
-            const elm = await waitForElm("[data-test-selector=direectory-grid-grid-layout]");
+            const elm = await waitForElm(".directory-header-new__description");
+            scriptConfirmLaunch("ALWU: await .directory-header-new__description");
             createLoopingInterval(twitchMethod, 1000);
         } else if(sessionStorage.getItem('twitchStartingChannel') != null) {
             scriptConfirmLaunch("ALWU: sessionStorage.getItem('twitchStartingChannel') != null");
@@ -177,9 +181,11 @@ function twitchMethod() {
         var liveStreamList = $('.preview-card-image-link');
 
         if(liveStreamList.length == 0 && noDropStreamsAvailable == null) {
+            scriptConfirmLaunch("Twitch: noDropStreamsAvailable = setTimeout(returnToLive, 300000);");
             noDropStreamsAvailable = setTimeout(returnToLive, 300000);
         } else if (liveStreamList.length != 0) {
             if(noDropStreamsAvailable != null) {
+                scriptConfirmLaunch("Twitch: resetTimeout(noDropStreamsAvailable);");
                 resetTimeout(noDropStreamsAvailable);
             }
             for (var i = 0; i < liveStreamList.length; i++) {
@@ -254,7 +260,6 @@ function twitchMethod() {
                 scriptConfirmLaunch("Twitch: tagCount != currentTagCount");
                 return returnToLive();
             } else if(currentGame != startingChannel) {
-                // Splits the URL into parts by using / as the delimiter. Checks the last part of the split parts, which would be the game
                 // If the current game is not the game you started with, go back to the game list
                 scriptConfirmLaunch("Twitch: currentGame != startingChannel");
                 return returnToLive();
