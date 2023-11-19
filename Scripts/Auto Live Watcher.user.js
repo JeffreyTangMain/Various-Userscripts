@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.5
+// @version      3.7.6
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -27,12 +27,13 @@ var infoLoaded = false;
 var tagCount = null;
 // Timer variable to wait a certain amount of seconds before clicking on the live button on a stream to prevent redirects, which will unload the script
 var twitchLiveTimer = 0;
-// Sets up boolean and timers for the connected drops check in youTubeMethod
+// Sets up boolean and timers for YouTube and Twitch to be null so they can see if they exist or not
 var timeoutCreated = false;
 var noDropsReload = null;
 var reloadStreams = null;
 var firstViewing = null;
 var noDropStreamsAvailable = null;
+var firstStreamReloadTimer = null;
 // Checks for the website you're currently on and runs the appropriate check
 scriptConfirmLaunch("ALWU: Auto Live Watcher Userscript Loaded");
 
@@ -79,7 +80,14 @@ async function detectSite() {
         } else if(sessionStorage.getItem('twitchStartingChannel') != null) {
             scriptConfirmLaunch("ALWU: sessionStorage.getItem('twitchStartingChannel') != null");
             startingChannel = sessionStorage.getItem('twitchStartingChannel');
-            return returnToLive();
+            var refreshStartingChannel = window.location.toString() + "/about";
+            if(startingChannel != refreshStartingChannel) {
+                scriptConfirmLaunch("ALWU: startingChannel != refreshStartingChannel");
+                return returnToLive();
+            } else {
+                scriptConfirmLaunch("ALWU: else startingChannel != refreshStartingChannel");
+                createLoopingInterval(twitchMethod, 1000);
+            }
         } else {
             removeConfirmPopup();
         }
@@ -186,7 +194,7 @@ function twitchMethod() {
         } else if (liveStreamList.length != 0) {
             if(noDropStreamsAvailable != null) {
                 scriptConfirmLaunch("Twitch: resetTimeout(noDropStreamsAvailable);");
-                resetTimeout(noDropStreamsAvailable);
+                noDropStreamsAvailable = resetTimeout(noDropStreamsAvailable);
             }
             for (var i = 0; i < liveStreamList.length; i++) {
                 if (typeof liveStreamList[i] != 'undefined') {
@@ -227,6 +235,12 @@ function twitchMethod() {
                 // Only goes into this check if the sessionStorage says the stream has been seen before, so the player must've refreshed
                 // If live, click the live icon to join stream
                 liveIcon.click();
+                if(firstStreamReloadTimer != null) {
+                    firstStreamReloadTimer = resetTimeout(firstStreamReloadTimer);
+                }
+                // Reloads the page after the stream is clicked into to try and ensure Twitch knows you're actually on the stream page instead of redirected
+                scriptConfirmLaunch("Twitch: firstStreamReloadTimer = setTimeout(function(){window.location.reload()}, 60000)");
+                firstStreamReloadTimer = setTimeout(function(){window.location.reload()}, 60000);
             }
             twitchLiveTimer++;
         } else if (viewerCount.length != 0) {
