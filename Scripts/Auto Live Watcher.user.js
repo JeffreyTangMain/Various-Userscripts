@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.6
+// @version      3.7.7
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -34,6 +34,7 @@ var reloadStreams = null;
 var firstViewing = null;
 var noDropStreamsAvailable = null;
 var firstStreamReloadTimer = null;
+var loopingInterval = null;
 // Checks for the website you're currently on and runs the appropriate check
 scriptConfirmLaunch("ALWU: Auto Live Watcher Userscript Loaded");
 
@@ -309,9 +310,8 @@ function dropClicker() {
 
 function createLoopingInterval(method, timer) {
     // Attempts to stop multiple loops from existing at once
-    if (typeof loopingInterval == 'undefined') {
-        clearInterval(loopingInterval);
-        var loopingInterval = setInterval(method, timer);
+    if (loopingInterval == null) {
+        loopingInterval = setInterval(method, timer);
     }
 }
 
@@ -321,8 +321,20 @@ function resetTimeout(timer) {
     return null;
 }
 
+function resetInterval(timer) {
+    // Clears an interval, returns null for that interval to be reset to null
+    clearInterval(timer);
+    return null;
+}
+
 function returnToLive() {
     // Return to stream list of saved streamer
+    resetTimeout(noDropsReload);
+    resetTimeout(reloadStreams);
+    resetTimeout(firstViewing);
+    resetTimeout(noDropStreamsAvailable);
+    resetTimeout(firstStreamReloadTimer);
+    resetInterval(loopingInterval);
     window.location.assign(startingChannel);
     return undefined;
 }
