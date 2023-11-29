@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.7
+// @version      3.7.8
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -82,7 +82,12 @@ async function detectSite() {
             scriptConfirmLaunch("ALWU: sessionStorage.getItem('twitchStartingChannel') != null");
             startingChannel = sessionStorage.getItem('twitchStartingChannel');
             var refreshStartingChannel = window.location.toString() + "/about";
-            if(startingChannel != refreshStartingChannel) {
+
+            if(sessionStorage.getItem('twitchCategoryFirstViewing') == window.location.href) {
+                scriptConfirmLaunch("ALWU: sessionStorage.getItem('twitchCategoryFirstViewing') == window.location.href");
+                categoryWatching = true;
+                createLoopingInterval(twitchMethod, 1000);
+            } else if(startingChannel != refreshStartingChannel) {
                 scriptConfirmLaunch("ALWU: startingChannel != refreshStartingChannel");
                 return returnToLive();
             } else {
@@ -268,6 +273,17 @@ function twitchMethod() {
             // Checks for the drops enabled tag to be loaded in the first place
             infoLoaded = true;
         } else if (infoLoaded == true) {
+            // Set the current watched channel for the category so it can remember on refresh
+            if(sessionStorage.getItem('twitchCategoryFirstViewing') != window.location.href) {
+                sessionStorage.setItem('twitchCategoryFirstViewing', window.location.href);
+                // Reloads the page after the stream is clicked into to try and ensure Twitch knows you're actually on the stream page instead of redirected
+                if(firstStreamReloadTimer != null) {
+                    firstStreamReloadTimer = resetTimeout(firstStreamReloadTimer);
+                }
+                scriptConfirmLaunch("Twitch: Category Watching firstStreamReloadTimer = setTimeout(function(){window.location.reload()}, 60000)");
+                firstStreamReloadTimer = setTimeout(function(){window.location.reload()}, 60000);
+            }
+
             if(tagCount == null) {
                 tagCount = currentTagCount;
             } else if(tagCount != currentTagCount) {
