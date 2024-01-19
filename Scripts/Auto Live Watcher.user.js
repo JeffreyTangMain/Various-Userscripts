@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.8
+// @version      3.7.9
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -227,6 +227,10 @@ function twitchMethod() {
         } else if (typeof pauseButton[0] != 'undefined' && pauseButton.attr("data-a-player-state") == "paused") {
             // Unpauses the video
             pauseButton[0].click();
+        } else if (raidPopup.length > 0) {
+            // If there's a raid popup on stream, return to live
+            scriptConfirmLaunch("Twitch: raidPopup.length > 0");
+            return returnToLive();
         }
     }
 
@@ -300,9 +304,6 @@ function twitchMethod() {
 
     if (window.location.toString() != startingChannel && window.location.toString() != watchedStream) {
         scriptConfirmLaunch("Twitch: window.location.toString() != startingChannel && window.location.toString() != watchedStream");
-        return returnToLive();
-    } else if (raidPopup.length > 0) {
-        scriptConfirmLaunch("Twitch: raidPopup.length > 0");
         return returnToLive();
     }
 }
