@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.9
+// @version      3.7.10
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -381,9 +381,15 @@ function scriptConfirmLaunch(string) {
     // Removes any existing boxes, creates a new box with the requested text in the top left corner that can be removed with a click
     removeConfirmPopup();
     console.log(string);
+
+    // Permanently adds these things to session storage as a log in between refreshes for debugging
+    var detailedString = string + " | " + current.getHours() + ":" + current.getMinutes() + ", v" + GM_info.script.version;
+    var currentLogHistory = sessionStorage.getItem('ALWUPermaLog') + " /// " + detailedString;
+    sessionStorage.setItem('ALWUPermaLog', currentLogHistory);
+
     var box = document.createElement('div');
     box.id = 'ALWUBoxConfirm';
-    box.textContent = string + " | " + current.getHours() + ":" + current.getMinutes() + ", v" + GM_info.script.version;
+    box.textContent = detailedString;
     document.body.appendChild(box);
     box.addEventListener('click', function () {
         box.parentNode.removeChild(box);
