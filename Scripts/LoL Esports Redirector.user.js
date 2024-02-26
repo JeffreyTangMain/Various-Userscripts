@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://github.com/
-// @version      4.5.0
+// @version      4.5.1
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -15,6 +15,7 @@
 /* globals $ */
 
 var heartbeatStoppedReload = null;
+var loopingInterval = null;
 
 // Style for the popup
 GM_addStyle(
@@ -45,12 +46,20 @@ async function youtubeEmbedScript() {
     // Handling for the YouTube embed autopausing
     const elm = await waitForElm("button.ytp-play-button");
     scriptConfirmLaunch("LOLER: YouTube Embed Loaded");
-    autoplayEmbed();
+    createLoopingInterval(autoplayEmbed, 5000);
 
     function autoplayEmbed(){
-        if($("button.ytp-play-button").attr("data-title-no-tooltip") != "Pause"){
+        var liveStatus = $(".ytp-live-badge:not(:disabled)");
+        var pauseButton = $(".ytp-play-button[data-title-no-tooltip='Play']");
+
+        if (liveStatus.length != 0) {
+            // Click the live indicator when paused or behind
+            liveStatus.click();
+        }
+        if(pauseButton.length != 0){
             $("button.ytp-large-play-button").click();
         }
+
         return true;
     }
 }
@@ -59,7 +68,7 @@ async function afreecatvEmbedScript() {
     // Handling for the Afreecatv embed autopausing
     const elm = await waitForElm("#afreecatv_player");
     scriptConfirmLaunch("LOLER: Afreecatv Embed Loaded");
-    autoplayEmbed();
+    createLoopingInterval(autoplayEmbed, 5000);
 
     function autoplayEmbed(){
         if($(".nextvideo").length != 0) {
@@ -68,6 +77,7 @@ async function afreecatvEmbedScript() {
         if($("button.play").not(".prev, .next").length != 0) {
             $("button.play").not(".prev, .next").click();
         }
+
         return true;
     }
 }
@@ -164,7 +174,7 @@ async function lolEsportsScript() {
 
     function liveClicker(method, loop){
         if($(".InformLoading").length != 0) {
-            if((Date.now() - sessionStorage.getItem("loadingCurrentMinute")) > 30000) {
+            if((Date.now() - sessionStorageDefault("loadingCurrentMinute", 0)) > 30000) {
                 sessionStorage.setItem("loadingCurrentMinute", Date.now());
                 loadingScreenCounter++;
             }
@@ -263,7 +273,19 @@ function sessionStorageDefault(key, storeDefault) {
     if(returnStorage == null){
         returnStorage = storeDefault;
     }
+
+    if(parseInt(returnStorage) != NaN) {
+        return parseInt(returnStorage);
+    }
+
     return returnStorage;
+}
+
+function createLoopingInterval(method, timer) {
+    // Attempts to stop multiple loops from existing at once
+    if (loopingInterval == null) {
+        loopingInterval = setInterval(method, timer);
+    }
 }
 
 function resetTimeout(timer) {
@@ -313,7 +335,7 @@ function scriptConfirmLaunch(string) {
 
     // Permanently adds these things to session storage as a log in between refreshes for debugging
     var detailedString = string + " | " + current.getHours() + ":" + current.getMinutes() + ", v" + GM_info.script.version;
-    var currentLogHistory = sessionStorage.getItem('LOLERPermaLog') + " /// " + detailedString;
+    var currentLogHistory = sessionStorageDefault('LOLERPermaLog', "") + " /// " + detailedString;
     sessionStorage.setItem('LOLERPermaLog', currentLogHistory);
 
     var box = document.createElement('div');
