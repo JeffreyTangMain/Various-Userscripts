@@ -1,27 +1,51 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
-// @namespace    https://lolesports.com/
-// @version      4.4.5
+// @namespace    https://github.com/
+// @version      4.5.0
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
 // @match        https://lolesports.com/live/*
 // @match        https://www.youtube.com/embed/*lolesports.com*
 // @match        *://*.afreecatv.com/player/*/embed*
-// @grant GM_setValue
-// @grant GM_getValue
-// @run-at        document-start
-// @require http://code.jquery.com/jquery-3.4.1.min.js
-// @require https://cdn.jsdelivr.net/gh/CoeJoder/waitForKeyElements.js@v1.2/waitForKeyElements.js
+// @grant        GM_addStyle
+// @require      http://code.jquery.com/jquery-3.4.1.min.js
 // ==/UserScript==
 // Documenting globals for JSHint to not throw an error for JQuery's $ function
-/* globals $ waitForKeyElements */
+/* globals $ */
 
 var heartbeatStoppedReload = null;
 
+// Style for the popup
+GM_addStyle(
+    '#LOLERPopup {' +
+    'background: black;' +
+    'color: white;' +
+    'font-size: max(1em, 18px);' +
+    'border: 1px solid red;' +
+    'padding: 4px;' +
+    'position: fixed;' +
+    'top: 8px; left: 8px;' +
+    'max-width: 400px;' +
+    'z-index: 999999;' +
+    '}'
+);
+
+scriptConfirmLaunch("LOLER: Script Running");
+
 if(window.location.toString().indexOf('youtube.com/embed') != -1) {
+    youtubeEmbedScript();
+} else if (window.location.toString().indexOf('afreecatv.com') != -1) {
+    afreecatvEmbedScript();
+} else {
+    lolEsportsScript();
+}
+
+async function youtubeEmbedScript() {
     // Handling for the YouTube embed autopausing
-    waitForKeyElements("button.ytp-play-button", autoplayEmbed, false);
+    const elm = await waitForElm("button.ytp-play-button");
+    scriptConfirmLaunch("LOLER: YouTube Embed Loaded");
+    autoplayEmbed();
 
     function autoplayEmbed(){
         if($("button.ytp-play-button").attr("data-title-no-tooltip") != "Pause"){
@@ -29,9 +53,13 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
         }
         return true;
     }
-} else if (window.location.toString().indexOf('afreecatv.com') != -1) {
+}
+
+async function afreecatvEmbedScript() {
     // Handling for the Afreecatv embed autopausing
-    waitForKeyElements("#afreecatv_player", autoplayEmbed, false);
+    const elm = await waitForElm("#afreecatv_player");
+    scriptConfirmLaunch("LOLER: Afreecatv Embed Loaded");
+    autoplayEmbed();
 
     function autoplayEmbed(){
         if($(".nextvideo").length != 0) {
@@ -42,19 +70,26 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
         }
         return true;
     }
-} else {
+}
+
+async function lolEsportsScript() {
+    scriptConfirmLaunch("LOLER: Primary Script Loaded");
     var redirectPathCheck = '/live';
     var containerLoaded = false;
     var tempString = '';
     var delayRefreshTimer = 300000;
     var heartbeatStopCounter = 0;
+    var loadingScreenCounter = 0;
 
     var oldLog = unsafeWindow.console.log;
 
     unsafeWindow.console.log = function(msg) {
         try {
+            if(arguments.length <= 1 || arguments == undefined || arguments == null){
+                null;
+            }
             // arguments[2] refers to the text before the -> in the console
-            if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('stopped')){
+            else if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('stopped')){
                 // arguments[4] includes the heartbeater status update
                 // Refreshes after a delay if the RewardsStatusInformer's heartbeat has stopped
                 // Note: heartbeater stops if the embed is muted and in the background, make sure you don't mute it in the embed
@@ -64,32 +99,32 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
 
                     // Will also refresh if too much time has passed ever since receiving a heartbeat stop
                     if(heartbeatStoppedReload == null) {
-                        console.log("LOLER: heartbeatStoppedReload = setTimeout(returnToLive, 300000);");
+                        scriptConfirmLaunch("LOLER: heartbeatStoppedReload = setTimeout(returnToLive, 300000);");
                         heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);
                         heartbeatStoppedReload = setTimeout(returnToLive, 300000);
                     }
                 } else {
-                    console.log("LOLER: arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('stopped')");
+                    scriptConfirmLaunch("LOLER: arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('stopped')");
                     return returnToLive();
                 }
             } else if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('heartbeating') && heartbeatStoppedReload != null){
-                console.log("LOLER: heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);");
+                scriptConfirmLaunch("LOLER: heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);");
                 heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);
                 heartbeatStopCounter = 0;
             }
             else if(arguments[2].includes('RewardsStatusInformer') && !(arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
                 // Checks if any rewards are enabled
-                if(GM_getValue("liveLinkNumber", 0) < GM_getValue("liveGameCount", 1)) {
-                    console.log("LOLER: GM_getValue('liveLinkNumber', 0) < GM_getValue('liveGameCount', 1)");
+                if(sessionStorageDefault("liveLinkNumber", 0) < sessionStorageDefault("liveGameCount", 1)) {
+                    scriptConfirmLaunch('LOLER: sessionStorageDefault("liveLinkNumber", 0) < sessionStorageDefault("liveGameCount", 1)');
                     return returnToLive();
-                } else if((Date.now() - GM_getValue("currentMinute", 0)) > delayRefreshTimer){
-                    console.log('LOLER: (Date.now() - GM_getValue("currentMinute", 0)) > delayRefreshTimer');
+                } else if((Date.now() - sessionStorageDefault("currentMinute", 0)) > delayRefreshTimer){
+                    scriptConfirmLaunch('LOLER: (Date.now() - sessionStorageDefault("currentMinute", 0)) > delayRefreshTimer');
                     return returnToLive();
                 }
             }
             // Checks if the video player has ended, which indicates a VOD
             else if(arguments[2].includes('VideoPlayer') && arguments[5].includes('ended')){
-                console.log("LOLER: arguments[2].includes('VideoPlayer') && arguments[5].includes('ended')");
+                scriptConfirmLaunch("LOLER: arguments[2].includes('VideoPlayer') && arguments[5].includes('ended')");
                 return returnToLive();
             }
             // Checks if the video player is playing
@@ -102,18 +137,19 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
             }
             // Check for an erroring WatchLive, which is another indicator of the stream ending
             else if(arguments[2].includes('WatchLive') && arguments[4].length == undefined){
-                console.log("LOLER: arguments[2].includes('WatchLive') && arguments[4].length == undefined");
+                scriptConfirmLaunch("LOLER: arguments[2].includes('WatchLive') && arguments[4].length == undefined");
                 return returnToLive();
             }
         } catch (error) {
-            null;
+            scriptConfirmLaunch("LOLER: " + error);
         }
         oldLog.apply(null, arguments);
     }
 
     if(window.location.toString().indexOf('/schedule') != -1){
-        waitForKeyElements('.Event', mainMethod);
-    } else{
+        const elm = await waitForElm(".Event");
+        mainMethod();
+    } else {
         window.onload = mainMethod;
     }
 
@@ -121,12 +157,26 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
         // A refresh function that runs when the live button is undefined and the page is not at the live section
         // This should refresh when there are no live games to check for new ones every refresh
         liveClicker(function(){setTimeout(function(){
-            console.log("LOLER: mainMethod liveClicker");
+            scriptConfirmLaunch("LOLER: mainMethod liveClicker");
             return returnToLive();
         }, delayRefreshTimer)});
     }
 
     function liveClicker(method, loop){
+        if($(".InformLoading").length != 0) {
+            if((Date.now() - sessionStorage.getItem("loadingCurrentMinute")) > 30000) {
+                sessionStorage.setItem("loadingCurrentMinute", Date.now());
+                loadingScreenCounter++;
+            }
+
+            if(loadingScreenCounter >= 5) {
+                return returnToLive();
+            }
+        } else {
+            loadingScreenCounter = 0;
+        }
+
+        scriptConfirmLaunch("LOLER: liveClicker Loop");
         // Finds and clicks all leagues that aren't currently enabled
         var clickedLeagues = $('button.button.league')
         clickedLeagues.filter(":not('.selected')").each(function() {
@@ -142,25 +192,25 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
             liveGameList.each(function() {
                 liveGameLinks = liveGameLinks + this.href;
             });
-            if(GM_getValue("liveGameLinks", '') != liveGameLinks) {
-                GM_setValue("liveGameCount", liveGameList.length);
-                GM_setValue("liveGameLinks", liveGameLinks);
-                GM_setValue("liveLinkNumber", 0);
+            if(sessionStorageDefault("liveGameLinks", "") != liveGameLinks) {
+                sessionStorage.setItem("liveGameCount", liveGameList.length);
+                sessionStorage.setItem("liveGameLinks", liveGameLinks);
+                sessionStorage.setItem("liveLinkNumber", 0);
             }
         }
         // ---------------------------------------
-        var liveLinkNumber = GM_getValue("liveLinkNumber", 0);
+        var liveLinkNumber = sessionStorageDefault("liveLinkNumber", 0);
         liveButton = liveButton[liveLinkNumber];
         if(liveButton == undefined){
-            GM_setValue("liveLinkNumber", 0);
+            sessionStorage.setItem("liveLinkNumber", 0);
             liveButton = $('a.live');
             liveButton = liveButton[0];
         }
-        liveLinkNumber = GM_getValue("liveLinkNumber", 0);
-        GM_setValue("liveLinkNumber", liveLinkNumber + 1);
+        liveLinkNumber = sessionStorageDefault("liveLinkNumber", 0);
+        sessionStorage.setItem("liveLinkNumber", liveLinkNumber + 1);
 
         //Prepares the timer when the page is loaded to refresh if there are no rewards.
-        GM_setValue("currentMinute", Date.now());
+        sessionStorage.setItem("currentMinute", Date.now());
 
         if(liveButton == undefined && window.location.toString().indexOf(redirectPathCheck) == -1){
             return method();
@@ -168,8 +218,8 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
             if(liveButton != undefined){
                 liveButton.click();
             }
-            if(loop != undefined){
-                clearInterval(loop);
+            if(loop != null){
+                loop = resetInterval(loop);
             }
             var manualTimer = 0;
             var timerThreshold = 60;
@@ -185,14 +235,14 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
                     // Will return to the schedule page if clicked into a page with no live button
                     // If there is a live button, meaning you're on the schedule, it will click it, remove the old loop, and then continue normal operation
                     liveClicker(function(){
-                        console.log("LOLER: window.location.toString().indexOf(redirectPathCheck) == -1");
+                        scriptConfirmLaunch("LOLER: window.location.toString().indexOf(redirectPathCheck) == -1");
                         return returnToLive();
                     }, rewardCheck);
                 } else if((rewardsEnabled == true && rewardsIcon != '#5ABBD4') || (manualTimer > timerThreshold && (containerLoaded == false || rewardsEnabled == false))){
                     // The first check is if rewards were enabled at some point in the past and aren't enabled currently
                     // The second check is a backup wait for some seconds that will refresh the page if the video still hasn't loaded
                     // #5ABBD4 is the fill color when rewards are working, #DE2F2F is the fill color when rewards aren't
-                    console.log("LOLER: (rewardsEnabled == true && rewardsIcon != '#5ABBD4') || (manualTimer > timerThreshold && (containerLoaded == false || rewardsEnabled == false))");
+                    scriptConfirmLaunch("LOLER: (rewardsEnabled == true && rewardsIcon != '#5ABBD4') || (manualTimer > timerThreshold && (containerLoaded == false || rewardsEnabled == false))");
                     return returnToLive();
                 } else if(document.readyState == 'complete'){
                     // Should click the close button on any drop popups
@@ -208,14 +258,75 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
     }
 }
 
+function sessionStorageDefault(key, storeDefault) {
+    var returnStorage = sessionStorage.getItem(key);
+    if(returnStorage == null){
+        returnStorage = storeDefault;
+    }
+    return returnStorage;
+}
+
 function resetTimeout(timer) {
     // Clears a timer, returns null for that timer to be reset to null
     clearTimeout(timer);
     return null;
 }
 
+function resetInterval(timer) {
+    // Clears an interval, returns null for that interval to be reset to null
+    clearInterval(timer);
+    return null;
+}
+
 function returnToLive() {
-    // Return to stream list of saved streamer
+    // Return to stream list
+    heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);
     window.location.assign('https://lolesports.com/schedule');
     return undefined;
+}
+
+function waitForElm(selector) {
+    return new Promise(resolve => {
+        if (document.querySelector(selector)) {
+            return resolve(document.querySelector(selector));
+        }
+
+        const observer = new MutationObserver(mutations => {
+            if (document.querySelector(selector)) {
+                resolve(document.querySelector(selector));
+                observer.disconnect();
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    });
+}
+
+function scriptConfirmLaunch(string) {
+    var current = new Date();
+    // Removes any existing boxes, creates a new box with the requested text in the top left corner that can be removed with a click
+    removeConfirmPopup();
+    console.log(string);
+
+    // Permanently adds these things to session storage as a log in between refreshes for debugging
+    var detailedString = string + " | " + current.getHours() + ":" + current.getMinutes() + ", v" + GM_info.script.version;
+    var currentLogHistory = sessionStorage.getItem('LOLERPermaLog') + " /// " + detailedString;
+    sessionStorage.setItem('LOLERPermaLog', currentLogHistory);
+
+    var box = document.createElement('div');
+    box.id = 'LOLERPopup';
+    box.textContent = detailedString;
+    document.body.appendChild(box);
+    box.addEventListener('click', function () {
+        box.parentNode.removeChild(box);
+    }, true);
+}
+
+function removeConfirmPopup() {
+    if($("#LOLERPopup").length != 0) {
+        $("#LOLERPopup").remove();
+    }
 }
