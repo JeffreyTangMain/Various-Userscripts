@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://github.com/
-// @version      4.5.1
+// @version      4.5.2
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
 // @match        https://lolesports.com/live/*
 // @match        https://www.youtube.com/embed/*lolesports.com*
 // @match        *://*.afreecatv.com/player/*/embed*
+// @match        https://player.twitch.tv/*parent=lolesports*
 // @grant        GM_addStyle
 // @require      http://code.jquery.com/jquery-3.4.1.min.js
 // ==/UserScript==
@@ -38,6 +39,8 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
     youtubeEmbedScript();
 } else if (window.location.toString().indexOf('afreecatv.com') != -1) {
     afreecatvEmbedScript();
+} else if (window.location.toString().indexOf('player.twitch.tv') != -1) {
+    twitchEmbedScript();
 } else {
     lolEsportsScript();
 }
@@ -57,7 +60,7 @@ async function youtubeEmbedScript() {
             liveStatus.click();
         }
         if(pauseButton.length != 0){
-            $("button.ytp-large-play-button").click();
+            pauseButton.click();
         }
 
         return true;
@@ -76,6 +79,33 @@ async function afreecatvEmbedScript() {
         }
         if($("button.play").not(".prev, .next").length != 0) {
             $("button.play").not(".prev, .next").click();
+        }
+
+        return true;
+    }
+}
+
+async function twitchEmbedScript() {
+    const elm = await waitForElm("button[aria-label*='Watch on Twitch']");
+    scriptConfirmLaunch("LOLER: Twitch Embed Loaded");
+    createLoopingInterval(autoplayEmbed, 5000);
+
+    function autoplayEmbed(){
+        var muteOnScreen = $(".click-to-unmute__container");
+        var pauseButton = $("button[data-a-player-state='paused']");
+        var muteVolumeButton = $("button[aria-label*='Unmute (m)']");
+
+        if (muteOnScreen.length != 0) {
+            // Big on screen unmute button
+            muteOnScreen.click();
+        }
+        if(pauseButton.length != 0){
+            // Pause button bottom left of screen
+            pauseButton.click();
+        }
+        if(muteVolumeButton.length != 0){
+            // Mute button bottom left of screen
+            muteVolumeButton.click();
         }
 
         return true;
