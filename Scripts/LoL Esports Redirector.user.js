@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://github.com/
-// @version      4.5.2
+// @version      4.5.3
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
 // @match        https://lolesports.com/live/*
 // @match        https://www.youtube.com/embed/*lolesports.com*
-// @match        *://*.afreecatv.com/player/*/embed*
+// @match        https://play.afreecatv.com/*/direct?fromApi=1
 // @match        https://player.twitch.tv/*parent=lolesports*
 // @grant        GM_addStyle
 // @require      http://code.jquery.com/jquery-3.4.1.min.js
@@ -74,11 +74,13 @@ async function afreecatvEmbedScript() {
     createLoopingInterval(autoplayEmbed, 5000);
 
     function autoplayEmbed(){
-        if($(".nextvideo").length != 0) {
-            $(".nextvideo").click();
+        if($(".nextvideo:visible").length != 0) {
+            $(".nextvideo:visible").click();
+            scriptConfirmLaunch("LOLER: Next Video Click");
         }
         if($("button.play").not(".prev, .next").length != 0) {
             $("button.play").not(".prev, .next").click();
+            scriptConfirmLaunch("LOLER: Play Click");
         }
 
         return true;
@@ -186,6 +188,23 @@ async function lolEsportsScript() {
         oldLog.apply(null, arguments);
     }
 
+    createLoopingInterval(checkInfiniteLoad, 5000);
+
+    function checkInfiniteLoad() {
+        if($(".InformLoading").length != 0) {
+            if((Date.now() - sessionStorageDefault("loadingCurrentMinute", 0)) > 30000) {
+                sessionStorage.setItem("loadingCurrentMinute", Date.now());
+                loadingScreenCounter++;
+            }
+
+            if(loadingScreenCounter >= 5) {
+                return returnToLive();
+            }
+        } else {
+            loadingScreenCounter = 0;
+        }
+    }
+
     if(window.location.toString().indexOf('/schedule') != -1){
         const elm = await waitForElm(".Event");
         mainMethod();
@@ -203,19 +222,6 @@ async function lolEsportsScript() {
     }
 
     function liveClicker(method, loop){
-        if($(".InformLoading").length != 0) {
-            if((Date.now() - sessionStorageDefault("loadingCurrentMinute", 0)) > 30000) {
-                sessionStorage.setItem("loadingCurrentMinute", Date.now());
-                loadingScreenCounter++;
-            }
-
-            if(loadingScreenCounter >= 5) {
-                return returnToLive();
-            }
-        } else {
-            loadingScreenCounter = 0;
-        }
-
         scriptConfirmLaunch("LOLER: liveClicker Loop");
         // Finds and clicks all leagues that aren't currently enabled
         var clickedLeagues = $('button.button.league')
