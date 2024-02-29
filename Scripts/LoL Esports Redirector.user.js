@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://github.com/
-// @version      5.0.1
+// @version      5.0.2
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -148,53 +148,61 @@ async function lolEsportsScript() {
         try {
             if(arguments.length <= 1 || arguments == undefined || arguments == null){
                 null;
-            }
-            // arguments[2] refers to the text before the -> in the console
-            else if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('stopped')){
-                // arguments[4] includes the heartbeater status update
-                // Refreshes after a delay if the RewardsStatusInformer's heartbeat has stopped
-                // Note: heartbeater stops if the embed is muted and in the background, make sure you don't mute it in the embed
-                if(heartbeatStopCounter < 2) {
-                    // Tracks the number of stopped heartbeats, refreshes if heartbeat is dead for some minutes
-                    heartbeatStopCounter++;
-                } else {
-                    scriptConfirmLaunch("LOLER: arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('stopped')");
-                    return returnToLive();
-                }
-            } else if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('heartbeating')){
-                scriptConfirmLaunch("LOLER: nothingLoadingReload = resetTimeout(nothingLoadingReload);");
-                nothingLoadingReload = resetTimeout(nothingLoadingReload);
-                nothingLoadingReload = setTimeout(returnToLive, delayRefreshTimer);
+            } else {
+                // arguments[2] refers to the text before the -> in the console
+                if(arguments[2].includes('RewardsStatusInformer')) {
+                    if(arguments[4].includes('stopped')){
+                        // arguments[4] includes the heartbeater status update
+                        // Refreshes after a delay if the RewardsStatusInformer's heartbeat has stopped
+                        // Note: heartbeater stops if the embed is muted and in the background, make sure you don't mute it in the embed
+                        if(heartbeatStopCounter < 2) {
+                            // Tracks the number of stopped heartbeats, refreshes if heartbeat is dead for some minutes
+                            heartbeatStopCounter++;
+                        } else {
+                            scriptConfirmLaunch("LOLER: arguments[4].includes('stopped')");
+                            return returnToLive();
+                        }
+                    } else if(arguments[4].includes('heartbeating')){
+                        scriptConfirmLaunch("LOLER: nothingLoadingReload = resetTimeout(nothingLoadingReload);");
+                        nothingLoadingReload = resetTimeout(nothingLoadingReload);
+                        nothingLoadingReload = setTimeout(returnToLive, delayRefreshTimer);
 
-                heartbeatStopCounter = 0;
-            }
-            else if(arguments[2].includes('RewardsStatusInformer') && !(arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
-                // Checks if any rewards are enabled
-                if(sessionStorageIntHandler("liveGameCurrentLinkNumber", 0) < sessionStorageIntHandler("liveGameAmount", 1) && sessionStorageDefault("liveGameFinalLink", false) == false) {
-                    scriptConfirmLaunch('LOLER: sessionStorageIntHandler("liveGameCurrentLinkNumber", 0) < sessionStorageIntHandler("liveGameAmount", 1) && sessionStorageDefault("liveGameFinalLink", false) == false');
-                    return returnToLive();
-                } else if((Date.now() - sessionStorageIntHandler("currentMinute", 0)) > delayRefreshTimer){
-                    scriptConfirmLaunch('LOLER: (Date.now() - sessionStorageIntHandler("currentMinute", 0)) > delayRefreshTimer');
+                        heartbeatStopCounter = 0;
+                    }
+                    if(!(arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
+                        // Checks if there are no missions or drops
+                        if(sessionStorageIntHandler("liveGameCurrentLinkNumber", 0) < sessionStorageIntHandler("liveGameAmount", 1) && sessionStorageDefault("liveGameFinalLink", false) == false) {
+                            scriptConfirmLaunch('LOLER: sessionStorageIntHandler("liveGameCurrentLinkNumber", 0) < sessionStorageIntHandler("liveGameAmount", 1) && sessionStorageDefault("liveGameFinalLink", false) == false');
+                            return returnToLive();
+                        } else if((Date.now() - sessionStorageIntHandler("currentMinute", 0)) > delayRefreshTimer){
+                            scriptConfirmLaunch('LOLER: (Date.now() - sessionStorageIntHandler("currentMinute", 0)) > delayRefreshTimer');
+                            return returnToLive();
+                        }
+                    }
+                    else if((arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
+                        // If there are rewards or drops, set final link to sit on this link for drops
+                        sessionStorage.setItem("liveGameFinalLink", true);
+                    }
+                } else if(arguments[2].includes('VideoPlayer')) {
+                    // Checks if the video player has ended, which indicates a VOD
+                    if(arguments[5].includes('ended')){
+                        scriptConfirmLaunch("LOLER: arguments[5].includes('ended')");
+                        return returnToLive();
+                    }
+                    // Checks if the video player is playing
+                    else if(arguments[5].toLowerCase().includes('playing')){
+                        containerLoaded = true;
+                    }
+                }
+                // This is a check specifically for YouTube because it has a different format for the log
+                else if(arguments[2].includes('VideoPlayerYouTube') && arguments[4].toLowerCase().includes('playing')){
+                    containerLoaded = true;
+                }
+                // Check for an erroring WatchLive, which is another indicator of the stream ending
+                else if(arguments[2].includes('WatchLive') && arguments[4].length == undefined){
+                    scriptConfirmLaunch("LOLER: arguments[2].includes('WatchLive') && arguments[4].length == undefined");
                     return returnToLive();
                 }
-            }
-            // Checks if the video player has ended, which indicates a VOD
-            else if(arguments[2].includes('VideoPlayer') && arguments[5].includes('ended')){
-                scriptConfirmLaunch("LOLER: arguments[2].includes('VideoPlayer') && arguments[5].includes('ended')");
-                return returnToLive();
-            }
-            // Checks if the video player is playing
-            else if(arguments[2].includes('VideoPlayer') && arguments[5].toLowerCase().includes('playing')){
-                containerLoaded = true;
-            }
-            // This is a check specifically for YouTube because it has a different format for the log
-            else if(arguments[2].includes('VideoPlayerYouTube') && arguments[4].toLowerCase().includes('playing')){
-                containerLoaded = true;
-            }
-            // Check for an erroring WatchLive, which is another indicator of the stream ending
-            else if(arguments[2].includes('WatchLive') && arguments[4].length == undefined){
-                scriptConfirmLaunch("LOLER: arguments[2].includes('WatchLive') && arguments[4].length == undefined");
-                return returnToLive();
             }
         } catch (error) {
             scriptConfirmLaunch("LOLER: " + error);
@@ -295,18 +303,21 @@ function iterateLiveGameList(liveGameList) {
     }
 
     var liveGameCurrentLinkNumber = sessionStorageIntHandler("liveGameCurrentLinkNumber", 0);
+    var liveGameFinalLink = sessionStorageDefault("liveGameFinalLink", false);
 
-
-    if(liveGameCurrentLinkNumber < liveGameList.length) {
+    if(liveGameCurrentLinkNumber < liveGameList.length && liveGameFinalLink == false) {
         sessionStorage.setItem("liveGameCurrentLinkNumber", liveGameCurrentLinkNumber + 1);
         var liveButton = liveGameList[liveGameCurrentLinkNumber];
-    }
-
-    liveGameCurrentLinkNumber = sessionStorageIntHandler("liveGameCurrentLinkNumber", 0);
-
-    if(liveGameCurrentLinkNumber >= liveGameList.length) {
-        sessionStorage.setItem("liveGameFinalLink", true);
-        liveButton = liveGameList[0];
+        if(liveGameCurrentLinkNumber + 1 == liveGameList.length) {
+            sessionStorage.setItem("liveGameFinalLink", true);
+        }
+    } else {
+        if(liveGameCurrentLinkNumber != 0) {
+            liveGameCurrentLinkNumber = liveGameCurrentLinkNumber - 1;
+        } else {
+            sessionStorage.setItem("liveGameCurrentLinkNumber", 1);
+        }
+        liveButton = liveGameList[liveGameCurrentLinkNumber];
     }
 
     return liveButton;
