@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://github.com/
-// @version      4.5.3
+// @version      5.0.0
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -9,14 +9,18 @@
 // @match        https://www.youtube.com/embed/*lolesports.com*
 // @match        https://play.afreecatv.com/*/direct?fromApi=1
 // @match        https://player.twitch.tv/*parent=lolesports*
+// @match        https://*.trovo.live/embed*
 // @grant        GM_addStyle
 // @require      http://code.jquery.com/jquery-3.4.1.min.js
 // ==/UserScript==
 // Documenting globals for JSHint to not throw an error for JQuery's $ function
 /* globals $ */
 
-var heartbeatStoppedReload = null;
 var loopingInterval = null;
+var nothingLoadingReload = null;
+var containerLoaded = false;
+var delayRefreshTimer = 300000;
+var loadingScreenCounter = 0;
 
 // Style for the popup
 GM_addStyle(
@@ -41,6 +45,8 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
     afreecatvEmbedScript();
 } else if (window.location.toString().indexOf('player.twitch.tv') != -1) {
     twitchEmbedScript();
+} else if (window.location.toString().indexOf('trovo.live') != -1) {
+    trovoEmbedScript();
 } else {
     lolEsportsScript();
 }
@@ -114,14 +120,27 @@ async function twitchEmbedScript() {
     }
 }
 
+async function trovoEmbedScript() {
+    const elm = await waitForElm(".player-video");
+    scriptConfirmLaunch("LOLER: Trovo Embed Loaded");
+    createLoopingInterval(autoplayEmbed, 5000);
+
+    function autoplayEmbed(){
+        var unpauseButton = $(".vcp-controls-panel:not(.vcp-playing) .vcp-playtoggle");
+
+        if(unpauseButton.length != 0) {
+            unpauseButton.click();
+        }
+    }
+}
+
 async function lolEsportsScript() {
     scriptConfirmLaunch("LOLER: Primary Script Loaded");
-    var redirectPathCheck = '/live';
-    var containerLoaded = false;
-    var tempString = '';
-    var delayRefreshTimer = 300000;
+    if(nothingLoadingReload == null) {
+        // Timer to reload if heartbeating doesn't start and continue every couple minutes
+        nothingLoadingReload = setTimeout(returnToLive, delayRefreshTimer);
+    }
     var heartbeatStopCounter = 0;
-    var loadingScreenCounter = 0;
 
     var oldLog = unsafeWindow.console.log;
 
@@ -138,29 +157,24 @@ async function lolEsportsScript() {
                 if(heartbeatStopCounter < 2) {
                     // Tracks the number of stopped heartbeats, refreshes if heartbeat is dead for some minutes
                     heartbeatStopCounter++;
-
-                    // Will also refresh if too much time has passed ever since receiving a heartbeat stop
-                    if(heartbeatStoppedReload == null) {
-                        scriptConfirmLaunch("LOLER: heartbeatStoppedReload = setTimeout(returnToLive, 300000);");
-                        heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);
-                        heartbeatStoppedReload = setTimeout(returnToLive, 300000);
-                    }
                 } else {
                     scriptConfirmLaunch("LOLER: arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('stopped')");
                     return returnToLive();
                 }
-            } else if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('heartbeating') && heartbeatStoppedReload != null){
-                scriptConfirmLaunch("LOLER: heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);");
-                heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);
+            } else if(arguments[2].includes('RewardsStatusInformer') && arguments[4].includes('heartbeating')){
+                scriptConfirmLaunch("LOLER: nothingLoadingReload = resetTimeout(nothingLoadingReload);");
+                nothingLoadingReload = resetTimeout(nothingLoadingReload);
+                nothingLoadingReload = setTimeout(returnToLive, delayRefreshTimer);
+
                 heartbeatStopCounter = 0;
             }
             else if(arguments[2].includes('RewardsStatusInformer') && !(arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
                 // Checks if any rewards are enabled
-                if(sessionStorageDefault("liveLinkNumber", 0) < sessionStorageDefault("liveGameCount", 1)) {
-                    scriptConfirmLaunch('LOLER: sessionStorageDefault("liveLinkNumber", 0) < sessionStorageDefault("liveGameCount", 1)');
+                if(sessionStorageIntHandler("liveGameCurrentLinkNumber", 0) < sessionStorageIntHandler("liveGameAmount", 1) && sessionStorageDefault("liveGameFinalLink", false) == false) {
+                    scriptConfirmLaunch('LOLER: sessionStorageIntHandler("liveGameCurrentLinkNumber", 0) < sessionStorageIntHandler("liveGameAmount", 1) && sessionStorageDefault("liveGameFinalLink", false) == false');
                     return returnToLive();
-                } else if((Date.now() - sessionStorageDefault("currentMinute", 0)) > delayRefreshTimer){
-                    scriptConfirmLaunch('LOLER: (Date.now() - sessionStorageDefault("currentMinute", 0)) > delayRefreshTimer');
+                } else if((Date.now() - sessionStorageIntHandler("currentMinute", 0)) > delayRefreshTimer){
+                    scriptConfirmLaunch('LOLER: (Date.now() - sessionStorageIntHandler("currentMinute", 0)) > delayRefreshTimer');
                     return returnToLive();
                 }
             }
@@ -188,119 +202,128 @@ async function lolEsportsScript() {
         oldLog.apply(null, arguments);
     }
 
-    createLoopingInterval(checkInfiniteLoad, 5000);
-
-    function checkInfiniteLoad() {
-        if($(".InformLoading").length != 0) {
-            if((Date.now() - sessionStorageDefault("loadingCurrentMinute", 0)) > 30000) {
-                sessionStorage.setItem("loadingCurrentMinute", Date.now());
-                loadingScreenCounter++;
-            }
-
-            if(loadingScreenCounter >= 5) {
-                return returnToLive();
-            }
-        } else {
-            loadingScreenCounter = 0;
-        }
-    }
+    sessionStorage.setItem("currentMinute", Date.now());
 
     if(window.location.toString().indexOf('/schedule') != -1){
         const elm = await waitForElm(".Event");
-        mainMethod();
+        scriptConfirmLaunch("LOLER: /schedule liveClicker Loop");
+        createLoopingInterval(lolEsportsLoop, 1000);
     } else {
-        window.onload = mainMethod;
+        scriptConfirmLaunch("LOLER: else liveClicker Loop");
+        window.onload = createLoopingInterval(lolEsportsLoop, 1000);
     }
+}
 
-    function mainMethod(){
-        // A refresh function that runs when the live button is undefined and the page is not at the live section
-        // This should refresh when there are no live games to check for new ones every refresh
-        liveClicker(function(){setTimeout(function(){
-            scriptConfirmLaunch("LOLER: mainMethod liveClicker");
-            return returnToLive();
-        }, delayRefreshTimer)});
-    }
+var noLiveGameReload = null;
+var manualTimer = 0;
+var timerThreshold = 60;
+var rewardsEnabled = false;
 
-    function liveClicker(method, loop){
-        scriptConfirmLaunch("LOLER: liveClicker Loop");
-        // Finds and clicks all leagues that aren't currently enabled
-        var clickedLeagues = $('button.button.league')
-        clickedLeagues.filter(":not('.selected')").each(function() {
-            this.click();
-        })
-        // Loops through all the live buttons in order, and resets back to the start of the list once it reaches the end
-        var liveButton = $('a.live');
-        // ---------------------------------------
-        // This chunk of code manages the userscript's memory of having gone through all the current live links
-        if(window.location.toString().indexOf('/schedule') != -1){
-            var liveGameList = $('a.live');
-            var liveGameLinks = "";
-            liveGameList.each(function() {
-                liveGameLinks = liveGameLinks + this.href;
-            });
-            if(sessionStorageDefault("liveGameLinks", "") != liveGameLinks) {
-                sessionStorage.setItem("liveGameCount", liveGameList.length);
-                sessionStorage.setItem("liveGameLinks", liveGameLinks);
-                sessionStorage.setItem("liveLinkNumber", 0);
-            }
-        }
-        // ---------------------------------------
-        var liveLinkNumber = sessionStorageDefault("liveLinkNumber", 0);
-        liveButton = liveButton[liveLinkNumber];
-        if(liveButton == undefined){
-            sessionStorage.setItem("liveLinkNumber", 0);
-            liveButton = $('a.live');
-            liveButton = liveButton[0];
-        }
-        liveLinkNumber = sessionStorageDefault("liveLinkNumber", 0);
-        sessionStorage.setItem("liveLinkNumber", liveLinkNumber + 1);
+function lolEsportsLoop() {
+    checkInfiniteLoad();
 
-        //Prepares the timer when the page is loaded to refresh if there are no rewards.
-        sessionStorage.setItem("currentMinute", Date.now());
+    if(window.location.toString().indexOf("/schedule") != -1){
+        // Functions if we're on the schedule page
+        clickDisabledLeagues();
 
-        if(liveButton == undefined && window.location.toString().indexOf(redirectPathCheck) == -1){
-            return method();
-        } else{
-            if(liveButton != undefined){
+        var liveGameList = $('a.live');
+        if(liveGameList.length >= 1) {
+            noLiveGameReload = resetTimeout(noLiveGameReload);
+            // If there is a live game list, iterate through it
+            var liveButton = iterateLiveGameList(liveGameList);
+            if(liveButton != undefined) {
                 liveButton.click();
             }
-            if(loop != null){
-                loop = resetInterval(loop);
+        } else if(liveGameList.length < 1) {
+            // If there is no live game list, prepare a timer to reload the page
+            if(noLiveGameReload == null) {
+                noLiveGameReload = setTimeout(returnToLive, delayRefreshTimer);
             }
-            var manualTimer = 0;
-            var timerThreshold = 60;
-            var rewardsEnabled = false;
-            var rewardCheck = setInterval(function() {
-                manualTimer > timerThreshold ? null : manualTimer++;
-                var rewardsIcon = $('.RewardsStatusInformer .status-summary svg path').attr('fill');
-                if(rewardsIcon == '#5ABBD4'){
-                    rewardsEnabled = true;
-                }
-                if(window.location.toString().indexOf(redirectPathCheck) == -1){
-                    // Resolves issues if the live stream is clicked out of at any time
-                    // Will return to the schedule page if clicked into a page with no live button
-                    // If there is a live button, meaning you're on the schedule, it will click it, remove the old loop, and then continue normal operation
-                    liveClicker(function(){
-                        scriptConfirmLaunch("LOLER: window.location.toString().indexOf(redirectPathCheck) == -1");
-                        return returnToLive();
-                    }, rewardCheck);
-                } else if((rewardsEnabled == true && rewardsIcon != '#5ABBD4') || (manualTimer > timerThreshold && (containerLoaded == false || rewardsEnabled == false))){
-                    // The first check is if rewards were enabled at some point in the past and aren't enabled currently
-                    // The second check is a backup wait for some seconds that will refresh the page if the video still hasn't loaded
-                    // #5ABBD4 is the fill color when rewards are working, #DE2F2F is the fill color when rewards aren't
-                    scriptConfirmLaunch("LOLER: (rewardsEnabled == true && rewardsIcon != '#5ABBD4') || (manualTimer > timerThreshold && (containerLoaded == false || rewardsEnabled == false))");
-                    return returnToLive();
-                } else if(document.readyState == 'complete'){
-                    // Should click the close button on any drop popups
-                    if($('.drops-fulfilled').length){
-                        var closeReward = document.querySelector (
-                            '.drops-fulfilled .actions .close'
-                        );
-                        closeReward.click();
-                    }
-                }
-            }, 1000);
         }
+    } else if(window.location.toString().indexOf("/live") != -1){
+        // Functions if we're on the live page
+
+        // If timer less than threshold, increment every loop of this function
+        manualTimer < timerThreshold ? manualTimer++ : null;
+
+        var rewardsIcon = $('.RewardsStatusInformer .status-summary svg path').attr('fill');
+        if(rewardsIcon == '#5ABBD4'){
+            rewardsEnabled = true;
+        }
+
+        var dropsFulfilled = $('.drops-fulfilled')
+        if(dropsFulfilled.length > 0){
+            var dropsFulfilledClose = $('.drops-fulfilled .actions .close');
+            dropsFulfilledClose.click();
+        }
+
+        if((rewardsEnabled == true && rewardsIcon != '#5ABBD4') || (manualTimer > timerThreshold && (containerLoaded == false || rewardsEnabled == false))){
+            // The first check is if rewards were enabled at some point in the past and aren't enabled currently
+            // The second check is a backup wait for some seconds that will refresh the page if the video still hasn't loaded
+            // #5ABBD4 is the fill color when rewards are working, #DE2F2F is the fill color when rewards aren't
+            scriptConfirmLaunch("LOLER: (rewardsEnabled == true && rewardsIcon != '#5ABBD4') || (manualTimer > timerThreshold && (containerLoaded == false || rewardsEnabled == false))");
+            return returnToLive();
+        }
+    } else {
+        // Functions run if not on live or schedule page
+        return returnToLive();
+    }
+}
+
+function clickDisabledLeagues() {
+    // Finds and clicks all leagues in the sidebar that aren't currently enabled
+    var clickedLeagues = $('button.button.league');
+    clickedLeagues.filter(":not('.selected')").each(function() {
+        this.click();
+    });
+}
+
+function iterateLiveGameList(liveGameList) {
+    // Goes through every currently available live game to check if there are drops
+    // Grabs every live link and compares it to storage to make sure the list is the latest one
+    var liveGameLinks = "";
+    liveGameList.each(function() {
+        liveGameLinks = liveGameLinks + this.href;
+    });
+
+    // Sets the current link number for iteration to 0 if the link list has changed from memory
+    if(sessionStorageDefault("liveGameLinks", "") != liveGameLinks) {
+        sessionStorage.setItem("liveGameAmount", liveGameList.length);
+        sessionStorage.setItem("liveGameLinks", liveGameLinks);
+        sessionStorage.setItem("liveGameCurrentLinkNumber", 0);
+        sessionStorage.setItem("liveGameFinalLink", false);
+    }
+
+    var liveGameCurrentLinkNumber = sessionStorageIntHandler("liveGameCurrentLinkNumber", 0);
+
+
+    if(liveGameCurrentLinkNumber < liveGameList.length) {
+        sessionStorage.setItem("liveGameCurrentLinkNumber", liveGameCurrentLinkNumber + 1);
+        var liveButton = liveGameList[liveGameCurrentLinkNumber];
+    }
+
+    liveGameCurrentLinkNumber = sessionStorageIntHandler("liveGameCurrentLinkNumber", 0);
+
+    if(liveGameCurrentLinkNumber >= liveGameList.length) {
+        sessionStorage.setItem("liveGameFinalLink", true);
+        liveButton = liveGameList[0];
+    }
+
+    return liveButton;
+}
+
+function checkInfiniteLoad() {
+    if($(".InformLoading").length != 0) {
+        if((Date.now() - sessionStorageIntHandler("loadingCurrentMinute", 0)) > 30000) {
+            sessionStorage.setItem("loadingCurrentMinute", Date.now());
+            loadingScreenCounter++;
+        }
+
+        if(loadingScreenCounter >= 5) {
+            return returnToLive();
+        }
+    } else {
+        loadingScreenCounter = 0;
     }
 }
 
@@ -310,9 +333,13 @@ function sessionStorageDefault(key, storeDefault) {
         returnStorage = storeDefault;
     }
 
-    if(parseInt(returnStorage) != NaN) {
-        return parseInt(returnStorage);
-    }
+    return returnStorage;
+}
+
+function sessionStorageIntHandler(key, storeDefault) {
+    // Calls the above function for sessionStorage to be turned into an int
+    var returnStorage = sessionStorageDefault(key, storeDefault);
+    returnStorage = parseInt(returnStorage);
 
     return returnStorage;
 }
@@ -338,7 +365,8 @@ function resetInterval(timer) {
 
 function returnToLive() {
     // Return to stream list
-    heartbeatStoppedReload = resetTimeout(heartbeatStoppedReload);
+    nothingLoadingReload = resetTimeout(nothingLoadingReload);
+    loopingInterval = resetTimeout(loopingInterval);
     window.location.assign('https://lolesports.com/schedule');
     return undefined;
 }
