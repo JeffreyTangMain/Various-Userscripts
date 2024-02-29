@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://github.com/
-// @version      5.0.2
+// @version      5.0.3
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/schedule*
@@ -171,8 +171,8 @@ async function lolEsportsScript() {
                     }
                     if(!(arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
                         // Checks if there are no missions or drops
-                        if(sessionStorageIntHandler("liveGameCurrentLinkNumber", 0) < sessionStorageIntHandler("liveGameAmount", 1) && sessionStorageDefault("liveGameFinalLink", false) == false) {
-                            scriptConfirmLaunch('LOLER: sessionStorageIntHandler("liveGameCurrentLinkNumber", 0) < sessionStorageIntHandler("liveGameAmount", 1) && sessionStorageDefault("liveGameFinalLink", false) == false');
+                        if(sessionStorageIntHandler("liveGameCurrentLinkNumber", 0) < sessionStorageIntHandler("liveGameAmount", 1) && sessionStorageDefault("liveGameFinalLink", "false") == "false") {
+                            scriptConfirmLaunch('LOLER: sessionStorageIntHandler("liveGameCurrentLinkNumber", 0) < sessionStorageIntHandler("liveGameAmount", 1) && sessionStorageDefault("liveGameFinalLink", "false") == "false"');
                             return returnToLive();
                         } else if((Date.now() - sessionStorageIntHandler("currentMinute", 0)) > delayRefreshTimer){
                             scriptConfirmLaunch('LOLER: (Date.now() - sessionStorageIntHandler("currentMinute", 0)) > delayRefreshTimer');
@@ -181,7 +181,7 @@ async function lolEsportsScript() {
                     }
                     else if((arguments[5].includes('mission=on') || arguments[5].includes('drop=on'))){
                         // If there are rewards or drops, set final link to sit on this link for drops
-                        sessionStorage.setItem("liveGameFinalLink", true);
+                        sessionStorage.setItem("liveGameFinalLink", "true");
                     }
                 } else if(arguments[2].includes('VideoPlayer')) {
                     // Checks if the video player has ended, which indicates a VOD
@@ -299,17 +299,17 @@ function iterateLiveGameList(liveGameList) {
         sessionStorage.setItem("liveGameAmount", liveGameList.length);
         sessionStorage.setItem("liveGameLinks", liveGameLinks);
         sessionStorage.setItem("liveGameCurrentLinkNumber", 0);
-        sessionStorage.setItem("liveGameFinalLink", false);
+        sessionStorage.setItem("liveGameFinalLink", "false");
     }
 
     var liveGameCurrentLinkNumber = sessionStorageIntHandler("liveGameCurrentLinkNumber", 0);
-    var liveGameFinalLink = sessionStorageDefault("liveGameFinalLink", false);
+    var liveGameFinalLink = sessionStorageDefault("liveGameFinalLink", "false");
 
-    if(liveGameCurrentLinkNumber < liveGameList.length && liveGameFinalLink == false) {
+    if(liveGameCurrentLinkNumber < liveGameList.length && liveGameFinalLink == "false") {
         sessionStorage.setItem("liveGameCurrentLinkNumber", liveGameCurrentLinkNumber + 1);
         var liveButton = liveGameList[liveGameCurrentLinkNumber];
         if(liveGameCurrentLinkNumber + 1 == liveGameList.length) {
-            sessionStorage.setItem("liveGameFinalLink", true);
+            sessionStorage.setItem("liveGameFinalLink", "true");
         }
     } else {
         if(liveGameCurrentLinkNumber != 0) {
