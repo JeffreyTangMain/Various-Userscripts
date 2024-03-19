@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.12
+// @version      3.7.13
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -124,7 +124,7 @@ function youTubeMethod() {
             timeoutCreated = true;
         }
         // Checks for drops to be connected
-        var connectedDrops = $("ytd-account-link-button-renderer:contains('Connected')");
+        var connectedDrops = $("account-link-button-view-model:contains('Connected')");
         if (noDropsReload != null && connectedDrops.length != 0) {
             scriptConfirmLaunch("YouTube: resetTimeout(noDropsReload);");
             noDropsReload = resetTimeout(noDropsReload);
