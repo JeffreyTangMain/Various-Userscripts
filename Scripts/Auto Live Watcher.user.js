@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.13
+// @version      3.7.14
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -70,8 +70,8 @@ async function detectSite() {
             createLoopingInterval(dropClicker, 60000);
         } else if (window.location.toString().indexOf('/about') != -1) {
             scriptConfirmLaunch("ALWU: Twitch /about detected");
-            const elm = await waitForElm('.channel-info-content [aria-label*="Channel is Live"] div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
-            scriptConfirmLaunch("ALWU: await .channel-info-content [aria-label*='Channel is Live'] div[class*='ChannelStatusTextIndicator'] [class^='CoreText']");
+            const elm = await waitForElm('.channel-info-content [aria-label*="Channel is Live"] div[class*="channel-status-text-indicator"] [class^="CoreText"]');
+            scriptConfirmLaunch("ALWU: await .channel-info-content [aria-label*='Channel is Live'] div[class*='channel-status-text-indicator'] [class^='CoreText']");
             createLoopingInterval(twitchMethod, 1000);
         } else if (window.location.toString().indexOf('?filter=drops&sort=VIEWER_COUNT') != -1) {
             scriptConfirmLaunch("ALWU: Twitch ?filter=drops&sort=VIEWER_COUNT detected");
@@ -172,7 +172,7 @@ function youTubeMethod() {
 
 function twitchMethod() {
     // Check for live icon below channel profile picture
-    var liveIcon = $('.channel-info-content [aria-label*="Channel is Live"] div[class*="ChannelStatusTextIndicator"] [class^="CoreText"]');
+    var liveIcon = $('.channel-info-content [aria-label*="Channel is Live"] div[class*="channel-status-text-indicator"] [class^="CoreText"]');
     // Will only click the live icon as long as there's no viewer count, because the viewer count only shows up when the stream is in focus
     var viewerCount = $('[data-a-target="animated-channel-viewers-count"]');
     var offlineText = $('[data-test-selector="follow-panel-overlay"] [class^="CoreText"]');
