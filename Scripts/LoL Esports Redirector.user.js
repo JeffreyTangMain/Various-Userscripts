@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://github.com/
-// @version      5.0.3
+// @version      5.0.4
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
+// @match        https://lolesports.com/*/schedule*
 // @match        https://lolesports.com/schedule*
 // @match        https://lolesports.com/live/*
 // @match        https://www.youtube.com/embed/*lolesports.com*
@@ -213,7 +214,7 @@ async function lolEsportsScript() {
     sessionStorage.setItem("currentMinute", Date.now());
 
     if(window.location.toString().indexOf('/schedule') != -1){
-        const elm = await waitForElm(".Event");
+        const elm = await waitForElm('[data-test-id="virtuoso-item-list"]');
         scriptConfirmLaunch("LOLER: /schedule liveClicker Loop");
         createLoopingInterval(lolEsportsLoop, 1000);
     } else {
@@ -234,7 +235,7 @@ function lolEsportsLoop() {
         // Functions if we're on the schedule page
         clickDisabledLeagues();
 
-        var liveGameList = $('a.live');
+        var liveGameList = $('a[href^="/live/"]');
         if(liveGameList.length >= 1) {
             noLiveGameReload = resetTimeout(noLiveGameReload);
             // If there is a live game list, iterate through it
@@ -280,8 +281,8 @@ function lolEsportsLoop() {
 
 function clickDisabledLeagues() {
     // Finds and clicks all leagues in the sidebar that aren't currently enabled
-    var clickedLeagues = $('button.button.league');
-    clickedLeagues.filter(":not('.selected')").each(function() {
+    var clickedLeagues = $('[data-filter="none"]');
+    clickedLeagues.each(function() {
         this.click();
     });
 }
