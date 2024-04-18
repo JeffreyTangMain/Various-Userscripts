@@ -13,3 +13,5 @@ LoL Esports Redirector: Automatically sends you to the live page for lolesports.
 Pick'ems Guesser: Automatically does pick'ems for you based on fan trends. Open the pick'ems page and click the button in the userscript menu.
 
 Twitch Drop Claim: Twitch drop claimer script. No longer maintained due to being superseded by the Auto Live Watcher script.
+
+YouTube Shorts to Videos: Redirects YouTube shorts to proper watch links instantly.
