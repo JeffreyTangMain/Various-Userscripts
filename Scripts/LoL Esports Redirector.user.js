@@ -1,12 +1,10 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://github.com/
-// @version      5.0.5
+// @version      5.0.6
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
-// @match        https://lolesports.com/*/schedule*
-// @match        https://lolesports.com/schedule*
-// @match        https://lolesports.com/live/*
+// @match        https://lolesports.com/*
 // @match        https://www.youtube.com/embed/*lolesports.com*
 // @match        https://play.afreecatv.com/*/direct?fromApi=1
 // @match        https://player.twitch.tv/*parent=lolesports*
@@ -38,18 +36,27 @@ GM_addStyle(
     '}'
 );
 
-scriptConfirmLaunch("LOLER: Script Running");
-
 if(window.location.toString().indexOf('youtube.com/embed') != -1) {
+    scriptConfirmLaunch("LOLER: YouTube Script Running");
     youtubeEmbedScript();
 } else if (window.location.toString().indexOf('afreecatv.com') != -1) {
+    scriptConfirmLaunch("LOLER: Afreecatv Script Running");
     afreecatvEmbedScript();
 } else if (window.location.toString().indexOf('player.twitch.tv') != -1) {
+    scriptConfirmLaunch("LOLER: Twitch Script Running");
     twitchEmbedScript();
 } else if (window.location.toString().indexOf('trovo.live') != -1) {
+    scriptConfirmLaunch("LOLER: Trovo Script Running");
     trovoEmbedScript();
-} else {
+} else if (window.location.toString().indexOf('/schedule') != -1) {
+    sessionStorage.setItem("LOLERScriptRunning", "true");
+    scriptConfirmLaunch("LOLER: Schedule Script Running");
     lolEsportsScript();
+} else {
+    if(sessionStorageDefault("LOLERScriptRunning", "false") == "true") {
+        scriptConfirmLaunch("LOLER: Continued Run Script Running");
+        lolEsportsScript();
+    }
 }
 
 async function youtubeEmbedScript() {
