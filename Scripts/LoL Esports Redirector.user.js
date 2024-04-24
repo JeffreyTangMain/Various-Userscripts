@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://github.com/
-// @version      5.0.4
+// @version      5.0.5
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/*/schedule*
@@ -147,7 +147,7 @@ async function lolEsportsScript() {
 
     unsafeWindow.console.log = function(msg) {
         try {
-            if(arguments.length <= 1 || arguments == undefined || arguments == null){
+            if(arguments.length <= 1 || arguments == undefined || arguments == null || arguments[0].includes('Apollo DevTools')){
                 null;
             } else {
                 // arguments[2] refers to the text before the -> in the console
