@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://github.com/
-// @version      5.0.6
+// @version      5.0.7
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/*
@@ -241,6 +241,12 @@ function lolEsportsLoop() {
     if(window.location.toString().indexOf("/schedule") != -1){
         // Functions if we're on the schedule page
         clickDisabledLeagues();
+
+        // Reset view to today's streams if scrolled away
+        var todayButton = $("button:contains('Today')");
+        if(todayButton[0] != undefined) {
+            todayButton[0].click();
+        }
 
         var liveGameList = $('a[href^="/live/"]');
         if(liveGameList.length >= 1) {
