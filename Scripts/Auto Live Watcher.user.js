@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.17
+// @version      3.7.18
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -234,7 +234,7 @@ function twitchMethod() {
         }
     }
 
-    if (typeof liveIcon != 'undefined' && liveIcon.text().includes("LIVE")) {
+    if (typeof liveIcon != 'undefined' && liveIcon.text().includes("Live")) {
         if (twitchLiveTimer >= 60 && viewerCount.length == 0) {
             if(sessionStorage.getItem('twitchFirstViewing') != startingChannel) {
                 // On the first time a stream goes live, refresh the page after some seconds to make sure the stream doesn't redirect
