@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.15
+// @version      3.7.16
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -172,7 +172,7 @@ function youTubeMethod() {
 
 function twitchMethod() {
     // Check for live icon below channel profile picture
-    var liveIcon = $('.channel-info-content [aria-label*="Channel is Live"] div[class*="channel-status-text-indicator"] [class^="CoreText"]');
+    var liveIcon = $('.channel-status-info--live [class^="CoreText"]');
     // Will only click the live icon as long as there's no viewer count, because the viewer count only shows up when the stream is in focus
     var viewerCount = $('[data-a-target="animated-channel-viewers-count"]');
     var offlineText = $('[data-test-selector="follow-panel-overlay"] [class^="CoreText"]');
