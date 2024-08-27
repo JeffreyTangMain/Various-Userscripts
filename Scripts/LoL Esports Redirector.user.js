@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://github.com/
-// @version      5.0.8
+// @version      5.1.0
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/*
@@ -48,7 +48,7 @@ if(window.location.toString().indexOf('youtube.com/embed') != -1) {
 } else if (window.location.toString().indexOf('trovo.live') != -1) {
     scriptConfirmLaunch("LOLER: Trovo Script Running");
     trovoEmbedScript();
-} else if (window.location.toString().indexOf('/schedule') != -1) {
+} else if (window.location.toString().indexOf('com/en-US') != -1) {
     sessionStorage.setItem("LOLERScriptRunning", "true");
     scriptConfirmLaunch("LOLER: Schedule Script Running");
     lolEsportsScript();
@@ -220,9 +220,9 @@ async function lolEsportsScript() {
 
     sessionStorage.setItem("currentMinute", Date.now());
 
-    if(window.location.toString().indexOf('/schedule') != -1){
-        const elm = await waitForElm('[data-test-id="virtuoso-item-list"]');
-        scriptConfirmLaunch("LOLER: /schedule liveClicker Loop");
+    if(window.location.toString().indexOf('com/en-US') != -1){
+        const elm = await waitForElm('section[class*="bg_home.group"] h4');
+        scriptConfirmLaunch("LOLER: com/en-US liveClicker Loop");
         createLoopingInterval(lolEsportsLoop, 1000);
     } else {
         scriptConfirmLaunch("LOLER: else liveClicker Loop");
@@ -238,12 +238,12 @@ var rewardsEnabled = false;
 function lolEsportsLoop() {
     checkInfiniteLoad();
 
-    if(window.location.toString().indexOf("/schedule") != -1){
+    if(window.location.toString().indexOf("com/en-US") != -1){
         // Functions if we're on the schedule page
-        clickDisabledLeagues();
+        //clickDisabledLeagues();
 
         // Reset view to today's streams if scrolled away
-        var todayButton = $("button:contains('Today')");
+        var todayButton = $('[aria-label="Today"]');
         if(todayButton[0] != undefined) {
             todayButton[0].click();
         }
@@ -393,7 +393,7 @@ function returnToLive() {
     nothingLoadingReload = resetTimeout(nothingLoadingReload);
     noLiveGameReload = resetTimeout(noLiveGameReload);
     loopingInterval = resetInterval(loopingInterval);
-    window.location.assign('https://lolesports.com/schedule');
+    window.location.assign('https://lolesports.com/en-US');
     return undefined;
 }
 
