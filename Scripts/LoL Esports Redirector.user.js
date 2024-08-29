@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LoL Esports Redirector
 // @namespace    https://github.com/
-// @version      5.1.0
+// @version      5.1.1
 // @description  Redirects the schedule to the livestream so you're always watching when it's available.
 // @author       Main
 // @match        https://lolesports.com/*
@@ -338,13 +338,14 @@ function iterateLiveGameList(liveGameList) {
 }
 
 function checkInfiniteLoad() {
-    if($(".InformLoading").length != 0) {
+    if($("div[style*='opacity:1'] svg[viewbox='0 0 425 425']").length != 0) {
         if((Date.now() - sessionStorageIntHandler("loadingCurrentMinute", 0)) > 30000) {
             sessionStorage.setItem("loadingCurrentMinute", Date.now());
             loadingScreenCounter++;
         }
 
         if(loadingScreenCounter >= 5) {
+            scriptConfirmLaunch("LOLER: loadingScreenCounter >= 5");
             return returnToLive();
         }
     } else {
