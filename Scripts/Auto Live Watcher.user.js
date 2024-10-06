@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.7.18
+// @version      3.7.19
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -16,7 +16,11 @@
 
 // Saves where you start this script so you can jump back to it later
 var startingChannel = window.location.href;
-var watchedStream = window.location.href;
+if(sessionStorage.getItem('twitchStartingChannel') != null) {
+    startingChannel = sessionStorage.getItem('twitchStartingChannel');
+}
+var watchedStream = startingChannel;
+
 // Sets variable so drop clicker can refresh page after timeouts are done
 var dropClickerChecks = 0;
 // Checks if YouTube live stream has been clicked
