@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.8.6
+// @version      3.8.7
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -30,6 +30,7 @@ var dropClickerChecks = 0;
 var clickChecker = false;
 // Toggle to enable category watching mode
 var infoLoaded = false;
+var viewerCountLoaded = false;
 var tagCount = null;
 // Sets up boolean and timers for YouTube and Twitch to be null so they can see if they exist or not
 var timeoutCreated = false;
@@ -85,7 +86,6 @@ async function detectSite() {
             createLoopingInterval(twitchCategoryWatcher, 1000);
         } else if (sessionStorage.getItem('twitchStartingChannel') != null) {
             scriptConfirmLaunch("ALWU: sessionStorage.getItem('twitchStartingChannel') != null");
-            const elm = await waitForElm('[data-a-target="animated-channel-viewers-count"]');
             startingChannel = sessionStorage.getItem('twitchStartingChannel');
             setTimeout(returnToLive, 3600000);
             createLoopingInterval(twitchCategoryChannelWatcher, 1000);
@@ -191,6 +191,10 @@ function twitchCheckDisruptions() {
 
     var startingChannelAboutRemover = startingChannel.replace('/about', '');
 
+    if(viewerCountLoaded == false && !(typeof viewerCount == 'undefined' || viewerCount.length == 0)) {
+        viewerCountLoaded = true;
+    }
+
     if (typeof offlineText != 'undefined' && offlineText.length > 0) {
         // If not live, go back to the about page
         scriptConfirmLaunch("Twitch: typeof offlineText != 'undefined'");
@@ -211,7 +215,7 @@ function twitchCheckDisruptions() {
         // If there's a raid popup on stream, return to live
         scriptConfirmLaunch("Twitch: raidPopup.length > 0");
         return returnToLive();
-    } else if (typeof viewerCount == 'undefined' || viewerCount.length == 0) {
+    } else if (viewerCountLoaded == true && (typeof viewerCount == 'undefined' || viewerCount.length == 0)) {
         scriptConfirmLaunch("Twitch: Viewer Counter Disappeared");
         return returnToLive();
     } else if (
