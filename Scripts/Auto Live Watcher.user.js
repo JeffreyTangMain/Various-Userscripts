@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.8.3
+// @version      3.8.4
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -188,7 +188,7 @@ function twitchCheckDisruptions() {
     var pauseButton = $('[data-a-target="player-play-pause-button"]');
     var matureAcceptanceButton = $('[data-a-target="player-overlay-mature-accept"]');
     var contentWarningButton = $('[data-a-target="content-classification-gate-overlay-start-watching-button"]');
-    var reloadPlayerButton = $("div[data-a-target='tw-core-button-label-text']:contains('Click Here to Reload Player')");
+    var reloadPlayerButton = $("div[data-a-target='tw-core-button-label-text']:contains('Reload Player')");
     var raidPopup = $("[data-test-selector='raid-banner']");
 
     var startingChannelAboutRemover = startingChannel.replace('/about', '');
