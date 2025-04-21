@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.8.2
+// @version      3.8.3
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -77,6 +77,7 @@ async function detectSite() {
         } else if (window.location.toString().indexOf('/about') != -1) {
             scriptConfirmLaunch("ALWU: Twitch /about detected");
             sessionStorage.setItem('twitchAbout', window.location.href);
+            sessionStorage.setItem('watchedStream', startingChannel.replace('/about', ''));
             createLoopingInterval(twitchAboutMethod, 1000);
         } else if (window.location.toString().indexOf('?filter=drops&sort=VIEWER_COUNT') != -1) {
             scriptConfirmLaunch("ALWU: Twitch ?filter=drops&sort=VIEWER_COUNT detected");
@@ -168,13 +169,10 @@ function youTubeMethod() {
 }
 
 function twitchAboutMethod() {
-    //const elm = await waitForElm('.channel-status-info--live [class^="CoreText"]');
-    //scriptConfirmLaunch('ALWU: await .channel-status-info--live [class^="CoreText"]');
     var aboutPage = sessionStorage.getItem('twitchAbout');
-    console.log(aboutPage);
 
     aboutRefresher++;
-    if (aboutRefresher >= 10) {
+    if (aboutRefresher >= 60) {
         return returnToLive();
     }
 
