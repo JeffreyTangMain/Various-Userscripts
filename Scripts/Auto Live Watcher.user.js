@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.8.5
+// @version      3.8.6
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -31,8 +31,6 @@ var clickChecker = false;
 // Toggle to enable category watching mode
 var infoLoaded = false;
 var tagCount = null;
-// Timer variable to wait a certain amount of seconds before clicking on the live button on a stream to prevent redirects, which will unload the script
-var aboutRefresher = 0;
 // Sets up boolean and timers for YouTube and Twitch to be null so they can see if they exist or not
 var timeoutCreated = false;
 var noDropsReload = null;
@@ -78,6 +76,7 @@ async function detectSite() {
             scriptConfirmLaunch("ALWU: Twitch /about detected");
             sessionStorage.setItem('twitchAbout', window.location.href);
             sessionStorage.setItem('watchedStream', startingChannel.replace('/about', ''));
+            setTimeout(returnToLive, 60000);
             createLoopingInterval(twitchAboutMethod, 1000);
         } else if (window.location.toString().indexOf('?filter=drops&sort=VIEWER_COUNT') != -1) {
             scriptConfirmLaunch("ALWU: Twitch ?filter=drops&sort=VIEWER_COUNT detected");
@@ -88,10 +87,12 @@ async function detectSite() {
             scriptConfirmLaunch("ALWU: sessionStorage.getItem('twitchStartingChannel') != null");
             const elm = await waitForElm('[data-a-target="animated-channel-viewers-count"]');
             startingChannel = sessionStorage.getItem('twitchStartingChannel');
+            setTimeout(returnToLive, 3600000);
             createLoopingInterval(twitchCategoryChannelWatcher, 1000);
         } else if (sessionStorage.getItem('twitchAbout') != null) {
             scriptConfirmLaunch("ALWU: Continuing from twitchAbout");
             startingChannel = sessionStorage.getItem('twitchAbout');
+            setTimeout(returnToLive, 3600000);
             createLoopingInterval(twitchCheckDisruptions, 1000);
         } else {
             removeConfirmPopup();
@@ -171,11 +172,6 @@ function youTubeMethod() {
 
 function twitchAboutMethod() {
     var aboutPage = sessionStorage.getItem('twitchAbout');
-
-    aboutRefresher++;
-    if (aboutRefresher >= 60) {
-        return returnToLive();
-    }
 
     var liveIcon = $('.channel-status-info--live [class^="CoreText"]');
     if (typeof liveIcon != 'undefined' && liveIcon.text().includes("Live")) {
