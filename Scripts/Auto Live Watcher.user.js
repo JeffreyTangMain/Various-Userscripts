@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.8.7
+// @version      3.8.8
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
