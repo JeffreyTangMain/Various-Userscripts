@@ -181,7 +181,7 @@ function twitchAboutMethod() {
 }
 
 function twitchCheckDisruptions() {
-    var offlineText = $('.channel-root__player--offline .home-offline-hero tw-title:contains("Check out")');
+    var offlineText = $('.channel-root__player--offline .home-offline-hero .tw-title:contains("Check out")');
     var pauseButton = $('[data-a-target="player-play-pause-button"]');
     var matureAcceptanceButton = $('[data-a-target="player-overlay-mature-accept"]');
     var contentWarningButton = $('[data-a-target="content-classification-gate-overlay-start-watching-button"]');
