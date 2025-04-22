@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.8.8
+// @version      3.8.9
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -39,7 +39,7 @@ var reloadStreams = null;
 var firstViewing = null;
 var noDropStreamsAvailable = null;
 var loopingInterval = null;
-// Checks for the website you're currently on and runs the appropriate check
+
 scriptConfirmLaunch("ALWU: Auto Live Watcher Userscript Loaded");
 
 // Style for the popup
@@ -58,6 +58,7 @@ GM_addStyle(
     '}'
 );
 
+// Checks for the website you're currently on and runs the appropriate check
 setTimeout(detectSite, 60000);
 
 async function detectSite() {
@@ -176,6 +177,7 @@ function twitchAboutMethod() {
     var liveIcon = $('.channel-status-info--live [class^="CoreText"]');
     if (typeof liveIcon != 'undefined' && liveIcon.text().includes("Live")) {
         startingChannel = aboutPage.replace('/about', '');
+        scriptConfirmLaunch("Twitch: Stream is live, going to stream");
         return returnToLive();
     }
 }
@@ -245,6 +247,7 @@ function twitchCategoryWatcher() {
                 watchedStream = "https://www.twitch.tv" + liveStreamList.eq(i).attr('href');
                 sessionStorage.setItem("watchedStream", watchedStream);
                 startingChannel = watchedStream;
+                scriptConfirmLaunch("Twitch: Found stream with drops, going to stream");
                 return returnToLive();
             }
         }
@@ -350,8 +353,10 @@ function scriptConfirmLaunch(string) {
     console.log(string);
 
     // Permanently adds these things to session storage as a log in between refreshes for debugging
-    var detailedString = string + " | " + current.getHours() + ":" + current.getMinutes() + ", v" + GM_info.script.version;
-    var currentLogHistory = sessionStorage.getItem('ALWUPermaLog') + " /// " + detailedString;
+    var mins = ('0'+current.getMinutes()).slice(-2);
+    var detailedString = string + " | " + current.getHours() + ":" + mins + ", v" + GM_info.script.version;
+    var pastLogHistory = sessionStorage.getItem('ALWUPermaLog') == null ? "" : sessionStorage.getItem('ALWUPermaLog') + " /// ";
+    var currentLogHistory = pastLogHistory + detailedString;
     sessionStorage.setItem('ALWUPermaLog', currentLogHistory);
 
     var box = document.createElement('div');
