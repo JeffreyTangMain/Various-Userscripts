@@ -8,6 +8,8 @@ Close Tab on Invalid Invite: This closes a https://discord.com/invite/ link if t
 
 Genshin Assistant: Open a page like https://www.hoyolab.com/genshin/topicDetail/5 and then click on your Userscript manager to use the "Both of the above" option. This will like the latest 10 posts, open 5 tabs to automatically favorite and unfavorite, and also click your daily login. The favoriting and unfavoriting is automatic, so it'll happen on every post even if you didn't click the "Both of the above" option.
 
+Hide Expired Twitch Drops: Hides the expired Twitch drops by making their display CSS into none, shouldn't interfere with any scripts that need to interact with them in the background.
+
 LoL Esports Redirector: Automatically sends you to the live page for lolesports.com and will refresh if drops aren't working. I spent a long time on this and still don't know if it's working properly.
 
 Pick'ems Guesser: Automatically does pick'ems for you based on fan trends. Open the pick'ems page and click the button in the userscript menu.
