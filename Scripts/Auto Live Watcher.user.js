@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.8.12
+// @version      3.8.13
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -184,6 +184,7 @@ function twitchAboutMethod() {
 
 function twitchCheckDisruptions() {
     var offlineText = $('.channel-root__player--offline .home-offline-hero .tw-title:contains("Check out")');
+    var followPanelOverlay = $(".follow-panel-overlay:contains('Follow and get notified when')");
     var currentlyLive = $('.home-carousel-info--live .channel-status-info--live:contains("Live Now")');
     var pauseButton = $('[data-a-target="player-play-pause-button"]');
     var matureAcceptanceButton = $('[data-a-target="player-overlay-mature-accept"]');
@@ -201,6 +202,9 @@ function twitchCheckDisruptions() {
     if (typeof offlineText != 'undefined' && offlineText.length > 0) {
         // If not live, go back to the about page
         scriptConfirmLaunch("Twitch: typeof offlineText != 'undefined'");
+        return returnToLive();
+    } else if (typeof followPanelOverlay != 'undefined' && followPanelOverlay.length > 0) {
+        scriptConfirmLaunch("Twitch: Offline stream, follow panel overlay found");
         return returnToLive();
     } else if (typeof matureAcceptanceButton[0] != 'undefined') {
         // Clicks the mature acceptance button
