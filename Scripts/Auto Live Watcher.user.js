@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.8.11
+// @version      3.8.12
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -261,7 +261,8 @@ function twitchCategoryWatcher() {
 
 function twitchCategoryChannelWatcher() {
     // If script is watching a category, check for the right game; if not present, return to stream list
-    var currentGame = $("[data-a-target='stream-game-link']:not([aria-label='Streaming Together'])").prop("href") + "?filter=drops&sort=VIEWER_COUNT"
+    var currentGame = startingChannel.replace("https://www.twitch.tv/","").replace("?filter=drops&sort=VIEWER_COUNT","");
+    currentGame = $("[href*='"+currentGame+"']").prop("href") + "?filter=drops&sort=VIEWER_COUNT";
     var currentTagCount = $('[aria-label^="Tag"]').length;
 
     if (currentGame != "undefined?filter=drops&sort=VIEWER_COUNT" && infoLoaded == false) {
