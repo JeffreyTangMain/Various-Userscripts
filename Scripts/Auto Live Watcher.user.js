@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.8.13
+// @version      3.8.14
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -190,7 +190,7 @@ function twitchCheckDisruptions() {
     var matureAcceptanceButton = $('[data-a-target="player-overlay-mature-accept"]');
     var contentWarningButton = $('[data-a-target="content-classification-gate-overlay-start-watching-button"]');
     var reloadPlayerButton = $("div[data-a-target='tw-core-button-label-text']:contains('Reload Player')");
-    var raidPopup = $("[data-test-selector='raid-banner']");
+    //var raidPopup = $("[data-test-selector='raid-banner']");
     var viewerCount = $('[data-a-target="animated-channel-viewers-count"]');
 
     var startingChannelAboutRemover = startingChannel.replace('/about', '');
@@ -218,11 +218,11 @@ function twitchCheckDisruptions() {
     } else if (typeof pauseButton[0] != 'undefined' && pauseButton.attr("data-a-player-state") == "paused") {
         // Unpauses the video
         pauseButton[0].click();
-    } else if (raidPopup.length > 0) {
+    } /*else if (raidPopup.length > 0) {
         // If there's a raid popup on stream, return to live
         scriptConfirmLaunch("Twitch: raidPopup.length > 0");
         return returnToLive();
-    } else if (viewerCountLoaded == true && (typeof viewerCount == 'undefined' || viewerCount.length == 0)) {
+    } */else if (viewerCountLoaded == true && (typeof viewerCount == 'undefined' || viewerCount.length == 0)) {
         scriptConfirmLaunch("Twitch: Viewer Counter Disappeared");
         return returnToLive();
     } else if(typeof currentlyLive[0] != 'undefined' && currentlyLive.length > 0) {
