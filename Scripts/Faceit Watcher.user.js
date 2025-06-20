@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Faceit Watcher
 // @namespace    https://github.com/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Watches Faceit streams for drops automatically.
 // @author       Main
 // @match        https://www.faceit.com/en/watch*
@@ -62,19 +62,19 @@ async function detectSite() {
 
 function gotoStream() {
     var liveIcon = $("div[class^='WatchHeroCarousel'] span:contains('Live')[class^='Text']");
-    var claimDrop = $("button:contains('Claim now')");
+    var claimNow = $("button:contains('Claim now')");
     var closeDropClaim = $("button:contains('Close')");
     jqueryClick(liveIcon);
     checkDisruptions();
-    if ((jqueryExist(claimDrop) || jqueryExist(closeDropClaim)) && clickTimeout1 == undefined && clickTimeout2 == undefined) {
+    if ((jqueryExist(claimNow) || jqueryExist(closeDropClaim)) && clickTimeout1 == undefined && clickTimeout2 == undefined) {
         claimDrop();
     }
 }
 
 function claimDrop() {
-    var claimDrop = $("button:contains('Claim now')");
+    var claimNow = $("button:contains('Claim now')");
     var closeDropClaim = $("button:contains('Close')");
-    clickTimeout1 = setTimeout(jqueryClick,10000,claimDrop);
+    clickTimeout1 = setTimeout(jqueryClick,10000,claimNow);
     clickTimeout2 = setTimeout(jqueryClick,15000,closeDropClaim);
     setTimeout(resetDropTimeouts,20000);
 }
