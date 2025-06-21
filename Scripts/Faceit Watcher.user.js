@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Faceit Watcher
 // @namespace    https://github.com/
-// @version      1.0.3
+// @version      1.0.4
 // @description  Watches Faceit streams for drops automatically.
 // @author       Main
 // @match        https://www.faceit.com/en/watch*
@@ -10,6 +10,7 @@
 // @grant        GM_info
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=faceit.com
 // @require      http://code.jquery.com/jquery-3.4.1.min.js
+// @noframes
 // ==/UserScript==
 // Documenting globals for JSHint to not throw an error for JQuery"s $ function
 /* globals $ */
