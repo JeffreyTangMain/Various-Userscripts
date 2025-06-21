@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Faceit Watcher
 // @namespace    https://github.com/
-// @version      1.0.1
+// @version      1.0.2
 // @description  Watches Faceit streams for drops automatically.
 // @author       Main
 // @match        https://www.faceit.com/en/watch*
@@ -25,6 +25,7 @@ var loopingInterval = undefined;
 var timeout = undefined;
 var clickTimeout1 = undefined;
 var clickTimeout2 = undefined;
+var firstTimeClick = true;
 
 GM_addStyle(
     "#FWBoxConfirm {" +
@@ -44,14 +45,15 @@ GM_addStyle(
 setTimeout(detectSite, 5000);
 
 async function detectSite() {
-    if (window.location.toString().indexOf("faceit.com") != -1 && window.location.toString().indexOf("/watch") != -1 && sessionStorage.getItem("startingChannel") == null) {
+    if (window.location.toString().indexOf("faceit.com") != -1 &&
+        window.location.toString().indexOf("/watch") != -1 &&
+        window.location.toString().indexOf("/matches") == -1 &&
+        sessionStorage.getItem("startingChannel") == null) {
         sessionStorage.setItem("startingChannel", window.location.href);
         popupMessage("Waiting for element");
         timeout = setTimeout(startPage,300000);
         const elm = await waitForElm("div[class^='WatchHeroCarousel']");
         popupMessage("Element detected, running script");
-        timeout = clearTimeout(timeout);
-        timeout = setTimeout(startPage, 3600000);
         createLoopingInterval(gotoStream, 1000);
     } else if(sessionStorage.getItem("startingChannel") != null) {
         popupMessage("Starting channel detected");
@@ -64,7 +66,11 @@ function gotoStream() {
     var liveIcon = $("div[class^='WatchHeroCarousel'] span:contains('Live')[class^='Text']");
     var claimNow = $("button:contains('Claim now')");
     var closeDropClaim = $("button:contains('Close')");
-    jqueryClick(liveIcon);
+    if(jqueryClick(liveIcon) && firstTimeClick) {
+        firstTimeClick = false;
+        timeout = clearTimeout(timeout);
+        timeout = setTimeout(startPage, 3600000);
+    }
     checkDisruptions();
     if ((jqueryExist(claimNow) || jqueryExist(closeDropClaim)) && clickTimeout1 == undefined && clickTimeout2 == undefined) {
         claimDrop();
