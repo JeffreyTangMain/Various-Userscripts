@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Faceit Watcher
 // @namespace    https://github.com/
-// @version      1.0.2
+// @version      1.0.3
 // @description  Watches Faceit streams for drops automatically.
 // @author       Main
 // @match        https://www.faceit.com/en/watch*
@@ -47,8 +47,7 @@ setTimeout(detectSite, 5000);
 async function detectSite() {
     if (window.location.toString().indexOf("faceit.com") != -1 &&
         window.location.toString().indexOf("/watch") != -1 &&
-        window.location.toString().indexOf("/matches") == -1 &&
-        sessionStorage.getItem("startingChannel") == null) {
+        window.location.toString().indexOf("/matches") == -1) {
         sessionStorage.setItem("startingChannel", window.location.href);
         popupMessage("Waiting for element");
         timeout = setTimeout(startPage,300000);
