@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Faceit Watcher
 // @namespace    https://github.com/
-// @version      1.0.4
+// @version      1.0.5
 // @description  Watches Faceit streams for drops automatically.
 // @author       Main
 // @match        https://www.faceit.com/en/watch*
@@ -43,7 +43,7 @@ GM_addStyle(
     "}"
 );
 
-setTimeout(detectSite, 5000);
+setTimeout(detectSite,5000);
 
 async function detectSite() {
     if (window.location.toString().indexOf("faceit.com") != -1 &&
@@ -54,22 +54,23 @@ async function detectSite() {
         timeout = setTimeout(startPage,300000);
         const elm = await waitForElm("div[class^='WatchHeroCarousel']");
         popupMessage("Element detected, running script");
-        createLoopingInterval(gotoStream, 1000);
+        createLoopingInterval(gotoStream,1000);
     } else if(sessionStorage.getItem("startingChannel") != null) {
         popupMessage("Starting channel detected");
-        timeout = setTimeout(startPage, 3600000);
-        createLoopingInterval(gotoStream, 1000);
+        timeout = setTimeout(startPage,3600000);
+        createLoopingInterval(gotoStream,1000);
     }
 }
 
 function gotoStream() {
     var liveIcon = $("div[class^='WatchHeroCarousel'] span:contains('Live')[class^='Text']");
+    var mainLiveIcon = $("div[class^='WatchHeroCarousel'] div[style*='user-select:'] span:contains('Live')[class^='Text']");
     var claimNow = $("button:contains('Claim now')");
     var closeDropClaim = $("button:contains('Close')");
-    if(jqueryClick(liveIcon) && firstTimeClick) {
+    if(jqueryClick(liveIcon) && jqueryClick(mainLiveIcon) && firstTimeClick) {
         firstTimeClick = false;
         timeout = clearTimeout(timeout);
-        timeout = setTimeout(startPage, 3600000);
+        timeout = setTimeout(startPage,3600000);
     }
     checkDisruptions();
     if ((jqueryExist(claimNow) || jqueryExist(closeDropClaim)) && clickTimeout1 == undefined && clickTimeout2 == undefined) {
