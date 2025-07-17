@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Faceit Watcher
 // @namespace    https://github.com/
-// @version      1.0.7
+// @version      1.0.8
 // @description  Watches Faceit streams for drops automatically.
 // @author       Main
 // @match        https://www.faceit.com/en/watch*
@@ -51,7 +51,8 @@ async function detectSite() {
         sessionStorage.setItem("startingChannel", window.location.href);
         popupMessage("Waiting for element");
         timeout = setTimeout(startPage, 300000);
-        const elm = await waitForElm("div[class^='WatchHeroCarousel']");
+        //const elm = await waitForElm("div[class^='WatchHeroCarousel']");
+        const elm = await waitForElm("div[class^='NavSectionItem'] a[aria-label='Watch'] span[class^='Notification']");
         popupMessage("Element detected, running script");
         timeout = clearTimeout(timeout);
         timeout = setTimeout(startPage, 3600000);
