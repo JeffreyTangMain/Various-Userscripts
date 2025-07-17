@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Faceit Watcher
 // @namespace    https://github.com/
-// @version      1.0.6
+// @version      1.0.7
 // @description  Watches Faceit streams for drops automatically.
 // @author       Main
 // @match        https://www.faceit.com/en/watch*
@@ -24,9 +24,6 @@ if (sessionStorage.getItem("startingChannel") != null) {
 }
 var loopingInterval = undefined;
 var timeout = undefined;
-//var clickTimeout1 = undefined;
-//var clickTimeout2 = undefined;
-var firstTimeClick = true;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -56,6 +53,8 @@ async function detectSite() {
         timeout = setTimeout(startPage, 300000);
         const elm = await waitForElm("div[class^='WatchHeroCarousel']");
         popupMessage("Element detected, running script");
+        timeout = clearTimeout(timeout);
+        timeout = setTimeout(startPage, 3600000);
         gotoStream();
     } else if (sessionStorage.getItem("startingChannel") != null) {
         popupMessage("Starting channel detected");
@@ -72,10 +71,7 @@ async function gotoStream() {
     if (jqueryExist(liveIcon) && !jqueryExist(mainLiveIcon)) {
         jqueryClick(liveIcon);
     }
-    if (jqueryExist(mainLiveIcon) && firstTimeClick) {
-        firstTimeClick = false;
-        timeout = clearTimeout(timeout);
-        timeout = setTimeout(startPage, 3600000);
+    if (jqueryExist(mainLiveIcon)) {
         jqueryClick(mainLiveIcon);
     }
     checkDisruptions();
