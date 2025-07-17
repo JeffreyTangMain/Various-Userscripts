@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Faceit Watcher
 // @namespace    https://github.com/
-// @version      1.0.5
+// @version      1.0.6
 // @description  Watches Faceit streams for drops automatically.
 // @author       Main
 // @match        https://www.faceit.com/en/watch*
@@ -24,9 +24,11 @@ if (sessionStorage.getItem("startingChannel") != null) {
 }
 var loopingInterval = undefined;
 var timeout = undefined;
-var clickTimeout1 = undefined;
-var clickTimeout2 = undefined;
+//var clickTimeout1 = undefined;
+//var clickTimeout2 = undefined;
 var firstTimeClick = true;
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 GM_addStyle(
     "#FWBoxConfirm {" +
@@ -43,7 +45,7 @@ GM_addStyle(
     "}"
 );
 
-setTimeout(detectSite,5000);
+setTimeout(detectSite, 5000);
 
 async function detectSite() {
     if (window.location.toString().indexOf("faceit.com") != -1 &&
@@ -51,56 +53,70 @@ async function detectSite() {
         window.location.toString().indexOf("/matches") == -1) {
         sessionStorage.setItem("startingChannel", window.location.href);
         popupMessage("Waiting for element");
-        timeout = setTimeout(startPage,300000);
+        timeout = setTimeout(startPage, 300000);
         const elm = await waitForElm("div[class^='WatchHeroCarousel']");
         popupMessage("Element detected, running script");
-        createLoopingInterval(gotoStream,1000);
-    } else if(sessionStorage.getItem("startingChannel") != null) {
+        gotoStream();
+    } else if (sessionStorage.getItem("startingChannel") != null) {
         popupMessage("Starting channel detected");
-        timeout = setTimeout(startPage,3600000);
-        createLoopingInterval(gotoStream,1000);
+        timeout = setTimeout(startPage, 3600000);
+        gotoStream();
     }
 }
 
-function gotoStream() {
+async function gotoStream() {
     var liveIcon = $("div[class^='WatchHeroCarousel'] span:contains('Live')[class^='Text']");
     var mainLiveIcon = $("div[class^='WatchHeroCarousel'] div[style*='user-select:'] span:contains('Live')[class^='Text']");
     var claimNow = $("button:contains('Claim now')");
-    var closeDropClaim = $("button:contains('Close')");
-    if(jqueryClick(liveIcon) && jqueryClick(mainLiveIcon) && firstTimeClick) {
+    var closeDropClaim = $("button:contains('Close')").not("[class*='WatchCard']");
+    if (jqueryExist(liveIcon) && !jqueryExist(mainLiveIcon)) {
+        jqueryClick(liveIcon);
+    }
+    if (jqueryExist(mainLiveIcon) && firstTimeClick) {
         firstTimeClick = false;
         timeout = clearTimeout(timeout);
-        timeout = setTimeout(startPage,3600000);
+        timeout = setTimeout(startPage, 3600000);
+        jqueryClick(mainLiveIcon);
     }
     checkDisruptions();
-    if ((jqueryExist(claimNow) || jqueryExist(closeDropClaim)) && clickTimeout1 == undefined && clickTimeout2 == undefined) {
-        claimDrop();
+    if (jqueryExist(claimNow) || jqueryExist(closeDropClaim)) {
+        await claimDrop();
     }
+    setTimeout(gotoStream, 1000);
 }
 
-function claimDrop() {
+async function claimDrop() {
     var claimNow = $("button:contains('Claim now')");
-    var closeDropClaim = $("button:contains('Close')");
-    clickTimeout1 = setTimeout(jqueryClick,10000,claimNow);
-    clickTimeout2 = setTimeout(jqueryClick,15000,closeDropClaim);
-    setTimeout(resetDropTimeouts,20000);
+    var closeDropClaim = $("button:contains('Close')").not("[class*='WatchCard']");
+    await sleep(10000);
+    jqueryClick(claimNow);
+    await sleep(10000);
+    jqueryClick(closeDropClaim);
+    //clickTimeout1 = setTimeout(jqueryClick,10000,claimNow);
+    //clickTimeout2 = setTimeout(jqueryClick,15000,closeDropClaim);
+    //setTimeout(resetDropTimeouts,20000);
 }
 
-function resetDropTimeouts() {
-    clickTimeout1 = clearTimeout(clickTimeout1);
-    clickTimeout2 = clearTimeout(clickTimeout2);
-}
+//function resetDropTimeouts() {
+//    clickTimeout1 = clearTimeout(clickTimeout1);
+//    clickTimeout2 = clearTimeout(clickTimeout2);
+//}
 
 function checkDisruptions() {
     //var unmuteTaskbar = $("aria-label='Unmute'");
     var videosTab = $("span[class^='Primary']:contains('Videos')");
+    var liveStreamEnded = $("div[class^='Layout__StreamEndedContainer']:contains('Live stream ended')");
 
     if (window.location.href != startingChannel && (window.location.toString().indexOf("faceit.com") == -1 || window.location.toString().indexOf("/watch/matches") == -1)) {
         popupMessage("Disruption 1");
         startPage();
     }
-    if(jqueryExist(videosTab)) {
+    if (jqueryExist(videosTab)) {
         popupMessage("Disruption 2");
+        startPage();
+    }
+    if (jqueryExist(liveStreamEnded)) {
+        popupMessage("Disruption 3");
         startPage();
     }
 }
@@ -112,6 +128,7 @@ function startPage() {
 function gotoPage(page) {
     loopingInterval = clearInterval(loopingInterval);
     timeout = clearTimeout(timeout);
+    //resetDropTimeouts();
     window.location.assign(page);
 }
 
