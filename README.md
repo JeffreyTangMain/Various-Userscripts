@@ -1,6 +1,8 @@
 # Various-Userscripts
 Auto Live Watcher: Will watch YouTube streams, specific Twitch streams, or streams in a category with drops enabled automatically. Also can claim Twitch drops automatically. Will run on the "streams" page for YouTube, the "about" tab for Twitch, automatically on the drops page for Twitch, or if the script is manually run by clicking the "Watch Category" option while on a game category for Twitch. Refresh on these specific pages if the script is not running; the script will not run if you go onto these pages, only if you load these pages from a link or after refreshing on these pages.
 
+Auto Twitch Queuer: Creates a text box to enter a list of streams and times to watch them. Use in tandem with Auto Live Watcher to automate lists of streams that aren't in a single drop category.
+
 Faceit Watcher: Watches Faceit Live, claiming drops if available. Untested.
 
 Hide Expired Twitch Drops: Hides the expired Twitch drops by making their display CSS into none, shouldn't interfere with any scripts that need to interact with them in the background.
