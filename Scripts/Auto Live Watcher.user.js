@@ -1,15 +1,15 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.8.14
+// @version      3.8.15
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
 // @match        https://www.twitch.tv/*
-// @grant         GM_registerMenuCommand
-// @grant         GM_addStyle
+// @grant        GM_registerMenuCommand
+// @grant        GM_addStyle
 // @grant        GM_info
-// @require http://code.jquery.com/jquery-3.4.1.min.js
+// @require      http://code.jquery.com/jquery-3.4.1.min.js
 // ==/UserScript==
 // Documenting globals for JSHint to not throw an error for JQuery's $ function
 /* globals $ */
@@ -41,6 +41,7 @@ var noDropStreamsAvailable = null;
 var loopingInterval = null;
 
 scriptConfirmLaunch("ALWU: Auto Live Watcher Userscript Loaded");
+removeConfirmPopup();
 
 // Style for the popup
 GM_addStyle(
