@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.0.0
+// @version      1.1.0
 // @description  Queue a list of streams to open at specific times.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -12,7 +12,12 @@
 GM_registerMenuCommand("Grab Schedule", grabSchedule);
 GM_registerMenuCommand("Read Schedule", readSchedule);
 
-var scheduleList = ["https://www.twitch.tv/directory/following","2025-10-03T11:00:00"];
+var currentDate = new Date();
+// getMonth is zero-indexed, so +1 to get the real month
+var currentDateString = currentDate.getFullYear() + "-" + (currentDate.getMonth() + 1) + "-" + currentDate.getDate();
+// Date.parse format: 2025-10-03T11:00:00 (12 hour format impossible)
+// Date.getTime format: 2025-10-03 2:00:00 PM (24 hour format possible)
+var scheduleList = ["https://www.twitch.tv/twitch/about",currentDateString + " 2:00:00 PM"];
 var slicedSchedule;
 var joiner = ",";
 // This is set by processSchedule to be cleared by readSchedule if the schedule is ever updated
@@ -29,6 +34,12 @@ if(!sessionStorageNull) {
 }
 
 function grabSchedule(string) {
+    // Toggle away the input box if this option is clicked again
+    if(document.getElementById("TwitchScheduleGrabber")) {
+        document.getElementById("TwitchScheduleGrabber").remove();
+        return;
+    }
+
     var box = document.createElement('textarea');
     box.type = 'text';
     // This'll get updated by processSchedule if you've run the script earlier
@@ -55,7 +66,8 @@ function scheduleString() {
 function processSchedule() {
     // This is either just set by readSchedule or from a previous run, so shouldn't need a check for null
     scheduleList = sessionStorage.getItem('scheduleStorage').split(",");
-    var timeDiff = Date.parse(scheduleList[1]) - Date.now();
+    var dateParser = new Date(scheduleList[1]).getTime();
+    var timeDiff = dateParser - Date.now();
     if(timeDiff > 0) {
         // +100ms is a tiny amount of buffer time to possibly wait for any page changes before going there
         scheduleTimeout = setTimeout(processSchedule, timeDiff + 100);
