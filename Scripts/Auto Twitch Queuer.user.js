@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.1.0
+// @version      1.1.1
 // @description  Queue a list of streams to open at specific times.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -45,6 +45,7 @@ function grabSchedule(string) {
     // This'll get updated by processSchedule if you've run the script earlier
     // Showing you what channels you've scheduled already
     box.value = scheduleList.join("\n");
+    box.style = "height:40rem";
     box.id = 'TwitchScheduleGrabber';
     document.body.prepend(box);
 }
