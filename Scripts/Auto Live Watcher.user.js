@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.8.15
+// @version      3.9.0
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -15,13 +15,11 @@
 /* globals $ */
 
 // Saves where you start this script so you can jump back to it later
-var startingChannel = window.location.href;
-if (sessionStorage.getItem("twitchStartingChannel") != null) {
-    startingChannel = sessionStorage.getItem('twitchStartingChannel');
-}
-var watchedStream = startingChannel;
-if (sessionStorage.getItem("watchedStream") != null) {
-    watchedStream = sessionStorage.getItem('watchedStream');
+var resetToLocation = window.location.href;
+var currentTargetLocation = resetToLocation;
+// Set by /about, YouTube, and twitchCategoryWatcher as the second check for what is being watched
+if (sessionStorage.getItem("storedCurrentTarget") != null) {
+    currentTargetLocation = sessionStorage.getItem("storedCurrentTarget");
 }
 
 // Sets variable so drop clicker can refresh page after timeouts are done
@@ -45,56 +43,56 @@ removeConfirmPopup();
 
 // Style for the popup
 GM_addStyle(
-    '#ALWUBoxConfirm {' +
-    'background: black;' +
-    'color: white;' +
-    'font-size: max(1em, 18px);' +
-    'border: 1px solid red;' +
-    'padding: 4px;' +
-    'position: absolute;' +
-    'top: 8px; left: 8px;' +
-    'max-width: 1000px;' +
-    'word-wrap: break-word;' +
-    'z-index: 999999;' +
-    '}'
+    "#ALWUBoxConfirm {" +
+    "background: black;" +
+    "color: white;" +
+    "font-size: max(1em, 18px);" +
+    "border: 1px solid red;" +
+    "padding: 4px;" +
+    "position: absolute;" +
+    "top: 8px; left: 8px;" +
+    "max-width: 1000px;" +
+    "word-wrap: break-word;" +
+    "z-index: 999999;" +
+    "}"
 );
 
 // Checks for the website you're currently on and runs the appropriate check
 setTimeout(detectSite, 60000);
 
 async function detectSite() {
-    if (window.location.toString().indexOf('youtube.com') != -1 && window.location.toString().indexOf('/streams') != -1) {
+    if (window.location.toString().indexOf("youtube.com") != -1 && window.location.toString().indexOf("/streams") != -1) {
         scriptConfirmLaunch("ALWU: YouTube /streams detected");
         const elm = await waitForElm(".ytd-two-column-browse-results-renderer");
         scriptConfirmLaunch("ALWU: await .ytd-two-column-browse-results-renderer");
         createLoopingInterval(youTubeMethod, 1000);
-    } else if (window.location.toString().indexOf('twitch.tv') != -1) {
-        if (window.location.toString().indexOf('drops/inventory') != -1) {
+    } else if (window.location.toString().indexOf("twitch.tv") != -1) {
+        if (window.location.toString().indexOf("drops/inventory") != -1) {
             scriptConfirmLaunch("ALWU: Twitch drops/inventory detected");
             const elm = await waitForElm(".inventory-page");
             scriptConfirmLaunch("ALWU: await .inventory-page");
             dropClicker();
             createLoopingInterval(dropClicker, 60000);
-        } else if (window.location.toString().indexOf('/about') != -1) {
+        } else if (window.location.toString().indexOf("/about") != -1) {
             scriptConfirmLaunch("ALWU: Twitch /about detected");
-            sessionStorage.setItem('twitchAbout', window.location.href);
-            sessionStorage.setItem('watchedStream', startingChannel.replace('/about', ''));
-            setTimeout(returnToLive, 60000);
+            sessionStorage.setItem("twitchAboutLocation", window.location.href);
+            sessionStorage.setItem("storedCurrentTarget", window.location.href.replace("/about", ""));
+            setTimeout(resetLocation, 60000);
             createLoopingInterval(twitchAboutMethod, 1000);
-        } else if (window.location.toString().indexOf('?filter=drops&sort=VIEWER_COUNT') != -1) {
+        } else if (window.location.toString().indexOf("?filter=drops&sort=VIEWER_COUNT") != -1) {
             scriptConfirmLaunch("ALWU: Twitch ?filter=drops&sort=VIEWER_COUNT detected");
             const elm = await waitForElm(".directory-header-new__description");
             scriptConfirmLaunch("ALWU: await .directory-header-new__description");
             createLoopingInterval(twitchCategoryWatcher, 1000);
-        } else if (sessionStorage.getItem('twitchStartingChannel') != null) {
-            scriptConfirmLaunch("ALWU: sessionStorage.getItem('twitchStartingChannel') != null");
-            startingChannel = sessionStorage.getItem('twitchStartingChannel');
-            setTimeout(returnToLive, 3600000);
+        } else if (sessionStorage.getItem("twitchWatchedCategory") != null) {
+            scriptConfirmLaunch("ALWU: sessionStorage.getItem('twitchWatchedCategory') != null");
+            resetToLocation = sessionStorage.getItem("twitchWatchedCategory");
+            setTimeout(resetLocation, 3600000);
             createLoopingInterval(twitchCategoryChannelWatcher, 1000);
-        } else if (sessionStorage.getItem('twitchAbout') != null) {
-            scriptConfirmLaunch("ALWU: Continuing from twitchAbout");
-            startingChannel = sessionStorage.getItem('twitchAbout');
-            setTimeout(returnToLive, 3600000);
+        } else if (sessionStorage.getItem("twitchAboutLocation") != null) {
+            scriptConfirmLaunch("ALWU: Continuing from twitchAboutLocation");
+            resetToLocation = sessionStorage.getItem("twitchAboutLocation");
+            setTimeout(resetLocation, 3600000);
             createLoopingInterval(twitchCheckDisruptions, 1000);
         } else {
             removeConfirmPopup();
@@ -112,7 +110,7 @@ function youTubeMethod() {
     // Click the pause button in case the video doesn't start or is paused
     var pauseButton = $(".ytp-play-button[data-title-no-tooltip='Play']");
 
-    if (window.location.toString().indexOf('/watch') != -1) {
+    if (window.location.toString().indexOf("/watch") != -1) {
         if (reloadStreams != null) {
             scriptConfirmLaunch("YouTube: resetTimeout(reloadStreams);");
             reloadStreams = resetTimeout(reloadStreams);
@@ -120,9 +118,9 @@ function youTubeMethod() {
         clickChecker = true;
         // Creates timer to reload stream if drops are not found
         if (timeoutCreated == false && noDropsReload == null) {
-            scriptConfirmLaunch("YouTube: noDropsReload = setTimeout(returnToLive, 300000);");
+            scriptConfirmLaunch("YouTube: noDropsReload = setTimeout(resetLocation, 300000);");
             noDropsReload = resetTimeout(noDropsReload);
-            noDropsReload = setTimeout(returnToLive, 300000);
+            noDropsReload = setTimeout(resetLocation, 300000);
             timeoutCreated = true;
         }
         // Checks for drops to be connected
@@ -131,17 +129,17 @@ function youTubeMethod() {
             scriptConfirmLaunch("YouTube: resetTimeout(noDropsReload);");
             noDropsReload = resetTimeout(noDropsReload);
         }
-        if (sessionStorage.getItem("watchedStream") != window.location.href) {
+        if (sessionStorage.getItem("storedCurrentTarget") != window.location.href) {
             // Refreshes the page after a delay to stop watching VODs
-            scriptConfirmLaunch("YouTube: firstViewing = setTimeout(returnToLive, 600000);");
-            firstViewing = setTimeout(returnToLive, 600000);
-            sessionStorage.setItem("watchedStream", window.location.href);
-            watchedStream = window.location.href;
+            scriptConfirmLaunch("YouTube: firstViewing = setTimeout(resetLocation, 600000);");
+            firstViewing = setTimeout(resetLocation, 600000);
+            sessionStorage.setItem("storedCurrentTarget", window.location.href);
+            currentTargetLocation = window.location.href;
         }
         if (streamEnd.length != 0) {
             // If the recommendation screen is showing, return to the stream list
             scriptConfirmLaunch("YouTube: streamEnd.length != 0");
-            return returnToLive();
+            return resetLocation();
         } else if (liveStatus.length != 0) {
             // Click the live indicator when paused or behind
             liveStatus.click();
@@ -149,15 +147,15 @@ function youTubeMethod() {
             // Unpauses the video and starts the video if it didn't autoplay
             pauseButton.click();
         }
-    } else if (window.location.toString().indexOf('/streams') != -1) {
-        startingChannel = window.location.href;
-        watchedStream = sessionStorage.getItem("watchedStream");
+    } else if (window.location.toString().indexOf("/streams") != -1) {
+        resetToLocation = window.location.href;
+        currentTargetLocation = sessionStorage.getItem("storedCurrentTarget");
         timeoutCreated = false;
         if (reloadStreams == null) {
             // Set up timer to reload for the button to show up or if the button fails to click the first time around
-            scriptConfirmLaunch("YouTube: reloadStreams = setTimeout(returnToLive, 300000);");
+            scriptConfirmLaunch("YouTube: reloadStreams = setTimeout(resetLocation, 300000);");
             reloadStreams = resetTimeout(reloadStreams);
-            reloadStreams = setTimeout(returnToLive, 300000);
+            reloadStreams = setTimeout(resetLocation, 300000);
         }
         if (liveButton.length != 0) {
             // Click button if it exists on the stream page
@@ -165,21 +163,21 @@ function youTubeMethod() {
         }
     }
 
-    if (window.location.href != watchedStream && window.location.href != startingChannel && clickChecker == true) {
+    if (window.location.href != currentTargetLocation && window.location.href != resetToLocation && clickChecker == true) {
         // Return to stream if you move away
-        scriptConfirmLaunch("YouTube: window.location.href != watchedStream && window.location.href != startingChannel && clickChecker == true");
-        return returnToLive();
+        scriptConfirmLaunch("YouTube: window.location.href != currentTargetLocation && window.location.href != resetToLocation && clickChecker == true");
+        return resetLocation();
     }
 }
 
 function twitchAboutMethod() {
-    var aboutPage = sessionStorage.getItem('twitchAbout');
+    var aboutPage = sessionStorage.getItem("twitchAboutLocation");
 
     var liveIcon = $('.channel-status-info--live [class^="CoreText"]');
-    if (typeof liveIcon != 'undefined' && liveIcon.text().includes("Live")) {
-        startingChannel = aboutPage.replace('/about', '');
+    if (typeof liveIcon != "undefined" && liveIcon.text().includes("Live")) {
+        resetToLocation = aboutPage.replace("/about", "");
         scriptConfirmLaunch("Twitch: Stream is live, going to stream");
-        return returnToLive();
+        return resetLocation();
     }
 }
 
@@ -194,71 +192,72 @@ function twitchCheckDisruptions() {
     //var raidPopup = $("[data-test-selector='raid-banner']");
     var viewerCount = $('[data-a-target="animated-channel-viewers-count"]');
 
-    var startingChannelAboutRemover = startingChannel.replace('/about', '');
+    var startingChannelAboutRemover = resetToLocation.replace("/about", "");
 
-    if(viewerCountLoaded == false && !(typeof viewerCount == 'undefined' || viewerCount.length == 0)) {
+    if(viewerCountLoaded == false && !(typeof viewerCount == "undefined" || viewerCount.length == 0)) {
         viewerCountLoaded = true;
     }
 
-    if (typeof offlineText != 'undefined' && offlineText.length > 0) {
+    if (typeof offlineText != "undefined" && offlineText.length > 0) {
         // If not live, go back to the about page
         scriptConfirmLaunch("Twitch: typeof offlineText != 'undefined'");
-        return returnToLive();
-    } else if (typeof followPanelOverlay != 'undefined' && followPanelOverlay.length > 0) {
+        return resetLocation();
+    } else if (typeof followPanelOverlay != "undefined" && followPanelOverlay.length > 0) {
         scriptConfirmLaunch("Twitch: Offline stream, follow panel overlay found");
-        return returnToLive();
-    } else if (typeof matureAcceptanceButton[0] != 'undefined') {
+        return resetLocation();
+    } else if (typeof matureAcceptanceButton[0] != "undefined") {
         // Clicks the mature acceptance button
         matureAcceptanceButton[0].click();
-    } else if (typeof contentWarningButton[0] != 'undefined') {
+    } else if (typeof contentWarningButton[0] != "undefined") {
         // Clicks the content warning start watching button
         contentWarningButton[0].click();
-    } else if (typeof reloadPlayerButton[0] != 'undefined') {
+    } else if (typeof reloadPlayerButton[0] != "undefined") {
         // Reloads the player if it gets bugged
         reloadPlayerButton[0].click();
-    } else if (typeof pauseButton[0] != 'undefined' && pauseButton.attr("data-a-player-state") == "paused") {
+    } else if (typeof pauseButton[0] != "undefined" && pauseButton.attr("data-a-player-state") == "paused") {
         // Unpauses the video
         pauseButton[0].click();
     } /*else if (raidPopup.length > 0) {
         // If there's a raid popup on stream, return to live
         scriptConfirmLaunch("Twitch: raidPopup.length > 0");
-        return returnToLive();
-    } */else if (viewerCountLoaded == true && (typeof viewerCount == 'undefined' || viewerCount.length == 0)) {
+        return resetLocation();
+    } */else if (viewerCountLoaded == true && (typeof viewerCount == "undefined" || viewerCount.length == 0)) {
         scriptConfirmLaunch("Twitch: Viewer Counter Disappeared");
-        return returnToLive();
-    } else if(typeof currentlyLive[0] != 'undefined' && currentlyLive.length > 0) {
+        return resetLocation();
+    } else if(typeof currentlyLive[0] != "undefined" && currentlyLive.length > 0) {
         scriptConfirmLaunch("Twitch: Stream live but wrong live page");
-        startingChannel = watchedStream;
-        return returnToLive();
+        resetToLocation = currentTargetLocation;
+        return resetLocation();
     } else if (
         window.location.toString().indexOf(startingChannelAboutRemover) == -1
-        && window.location.toString().indexOf(watchedStream) == -1) {
+        && window.location.toString().indexOf(currentTargetLocation) == -1) {
         scriptConfirmLaunch("Twitch: Moved away from stream page");
-        return returnToLive();
+        return resetLocation();
     }
 }
 
 function twitchCategoryWatcher() {
     // Go through live streams with drops and click the first one available
-    startingChannel = window.location.href;
-    sessionStorage.setItem('twitchStartingChannel', startingChannel);
-    var liveStreamList = $('.preview-card-image-link');
+    resetToLocation = window.location.href;
+    sessionStorage.setItem("twitchWatchedCategory", resetToLocation);
+    var liveStreamList = $(".preview-card-image-link");
 
     if (liveStreamList.length == 0 && noDropStreamsAvailable == null) {
-        scriptConfirmLaunch("Twitch: noDropStreamsAvailable = setTimeout(returnToLive, 300000);");
-        noDropStreamsAvailable = setTimeout(returnToLive, 300000);
+        scriptConfirmLaunch("Twitch: noDropStreamsAvailable = setTimeout(resetLocation, 300000);");
+        noDropStreamsAvailable = setTimeout(resetLocation, 300000);
     } else if (liveStreamList.length != 0) {
         if (noDropStreamsAvailable != null) {
             scriptConfirmLaunch("Twitch: resetTimeout(noDropStreamsAvailable);");
             noDropStreamsAvailable = resetTimeout(noDropStreamsAvailable);
         }
         for (var i = 0; i < liveStreamList.length; i++) {
-            if (typeof liveStreamList[i] != 'undefined') {
-                watchedStream = "https://www.twitch.tv" + liveStreamList.eq(i).attr('href');
-                sessionStorage.setItem("watchedStream", watchedStream);
-                startingChannel = watchedStream;
+            if (typeof liveStreamList[i] != "undefined") {
+                // twitchCheckDisruptions uses storedCurrentTarget here to check for leaving the target stream after refresh 
+                currentTargetLocation = "https://www.twitch.tv" + liveStreamList.eq(i).attr("href");
+                sessionStorage.setItem("storedCurrentTarget", currentTargetLocation);
+                resetToLocation = currentTargetLocation;
                 scriptConfirmLaunch("Twitch: Found stream with drops, going to stream");
-                return returnToLive();
+                return resetLocation();
             }
         }
     }
@@ -266,7 +265,7 @@ function twitchCategoryWatcher() {
 
 function twitchCategoryChannelWatcher() {
     // If script is watching a category, check for the right game; if not present, return to stream list
-    var currentGame = startingChannel.replace("https://www.twitch.tv/","").replace("?filter=drops&sort=VIEWER_COUNT","");
+    var currentGame = resetToLocation.replace("https://www.twitch.tv/","").replace("?filter=drops&sort=VIEWER_COUNT","");
     currentGame = $("[href*='"+currentGame+"']").prop("href") + "?filter=drops&sort=VIEWER_COUNT";
     var currentTagCount = $('[aria-label^="Tag"]').length;
 
@@ -279,11 +278,11 @@ function twitchCategoryChannelWatcher() {
         } else if (tagCount != currentTagCount) {
             // If the amount of tags change, maybe it's a channel with no more drops, so return to the drops list
             scriptConfirmLaunch("Twitch: tagCount != currentTagCount");
-            return returnToLive();
-        } else if (currentGame != startingChannel) {
+            return resetLocation();
+        } else if (currentGame != resetToLocation) {
             // If the current game is not the game you started with, go back to the game list
-            scriptConfirmLaunch("Twitch: currentGame != startingChannel");
-            return returnToLive();
+            scriptConfirmLaunch("Twitch: currentGame != resetToLocation");
+            return resetLocation();
         }
     }
 
@@ -301,7 +300,7 @@ function dropClicker() {
     if (dropClickerChecks >= 3) {
         // Refresh after the timeout goes through and after clicking all the drop claims
         scriptConfirmLaunch("Twitch: dropClickerChecks >= 3");
-        return returnToLive();
+        return resetLocation();
     } else {
         dropClickerChecks++;
     }
@@ -326,14 +325,14 @@ function resetInterval(timer) {
     return null;
 }
 
-function returnToLive() {
+function resetLocation() {
     // Return to stream list of saved streamer
     resetTimeout(noDropsReload);
     resetTimeout(reloadStreams);
     resetTimeout(firstViewing);
     resetTimeout(noDropStreamsAvailable);
     resetInterval(loopingInterval);
-    window.location.assign(startingChannel);
+    window.location.assign(resetToLocation);
     return undefined;
 }
 
@@ -364,17 +363,17 @@ function scriptConfirmLaunch(string) {
     console.log(string);
 
     // Permanently adds these things to session storage as a log in between refreshes for debugging
-    var mins = ('0'+current.getMinutes()).slice(-2);
+    var mins = ("0"+current.getMinutes()).slice(-2);
     var detailedString = string + " | " + current.getHours() + ":" + mins + ", v" + GM_info.script.version;
-    var pastLogHistory = sessionStorage.getItem('ALWUPermaLog') == null ? "" : sessionStorage.getItem('ALWUPermaLog') + " /// ";
+    var pastLogHistory = sessionStorage.getItem("ALWUPermaLog") == null ? "" : sessionStorage.getItem("ALWUPermaLog") + " /// ";
     var currentLogHistory = pastLogHistory + detailedString;
-    sessionStorage.setItem('ALWUPermaLog', currentLogHistory);
+    sessionStorage.setItem("ALWUPermaLog", currentLogHistory);
 
-    var box = document.createElement('div');
-    box.id = 'ALWUBoxConfirm';
+    var box = document.createElement("div");
+    box.id = "ALWUBoxConfirm";
     box.textContent = detailedString;
     document.body.appendChild(box);
-    box.addEventListener('click', function () {
+    box.addEventListener("click", function () {
         box.parentNode.removeChild(box);
     }, true);
 }
@@ -388,8 +387,8 @@ function removeConfirmPopup() {
 GM_registerMenuCommand("Watch Category", () => {
     // Only watches streams with drops enabled
     var dropsEnabledURL = window.location.href;
-    if (dropsEnabledURL.indexOf('?') != -1) {
-        dropsEnabledURL = dropsEnabledURL.substring(0, dropsEnabledURL.indexOf('?'));
+    if (dropsEnabledURL.indexOf("?") != -1) {
+        dropsEnabledURL = dropsEnabledURL.substring(0, dropsEnabledURL.indexOf("?"));
     }
     dropsEnabledURL = dropsEnabledURL + "?filter=drops&sort=VIEWER_COUNT";
 
