@@ -79,9 +79,10 @@ async function detectSite() {
             popupText("ALWU: 3 - Twitch /about detected");
 
             // twitchAboutLocation lets the script go into the main disruption checking loop
-            // storedCurrentTarget is used inside that disruption checking loop to check if the page changed 
+            // storedCurrentTarget is used inside that disruption checking loop to check if the page changed
             sessionStorage.setItem("twitchAboutLocation", window.location.href);
             sessionStorage.setItem("storedCurrentTarget", window.location.href.replace("/about", ""));
+            sessionStorage.removeItem("twitchWatchedCategory");
 
             setTimeout(resetLocation, 60000);
             createLoopingInterval(twitchAboutMethod, 1000);
@@ -89,6 +90,9 @@ async function detectSite() {
             // Loop leads to 5 then back if disruption is found
             popupText("ALWU: 4 - Twitch Category Watcher detected");
             const elm = await waitForElm(".directory-header-new__description");
+
+            sessionStorage.removeItem("twitchAboutLocation");
+
             createLoopingInterval(twitchCategoryWatcher, 1000);
         } else if (sessionStorage.getItem("twitchWatchedCategory") != null) {
             // Loop continuation from 4
