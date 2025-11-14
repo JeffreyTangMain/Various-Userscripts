@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.1.2
+// @version      1.1.3
 // @description  Queue a list of streams to open at specific times.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -17,7 +17,7 @@ var currentDate = new Date();
 var currentDateString = currentDate.getFullYear() + "-" + (currentDate.getMonth() + 1) + "-" + currentDate.getDate();
 // Date.parse format: 2025-10-03T11:00:00 (12 hour format impossible)
 // Date.getTime format: 2025-10-03 2:00:00 PM (24 hour format possible)
-var scheduleList = ["https://www.twitch.tv/twitch/about",currentDateString + " 1:00:00 AM"];
+var scheduleList = ["https://www.twitch.tv/twitch/about",currentDateString + " 1:00:00 APM"];
 var slicedSchedule;
 var joiner = ",";
 // This is set by processSchedule to be cleared by readSchedule if the schedule is ever updated
