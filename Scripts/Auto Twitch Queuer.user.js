@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.1.3
+// @version      1.1.4
 // @description  Queue a list of streams to open at specific times.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -11,6 +11,7 @@
 
 GM_registerMenuCommand("Grab Schedule", grabSchedule);
 GM_registerMenuCommand("Read Schedule", readSchedule);
+GM_registerMenuCommand("Next In Queue", nextinQueue);
 
 var currentDate = new Date();
 // getMonth is zero-indexed, so +1 to get the real month
@@ -60,6 +61,14 @@ function readSchedule() {
     processSchedule();
 }
 
+function nextinQueue() {
+    scheduleList = sessionStorage.getItem('scheduleStorage').split(",");
+    // This could probably also break if the length has an odd count, but that's user error too
+    if(scheduleList.length > 0) {
+        gotoNextWebsite();
+    }
+}
+
 function scheduleString() {
     return scheduleList.join(joiner);
 }
@@ -73,11 +82,15 @@ function processSchedule() {
         // +100ms is a tiny amount of buffer time to possibly wait for any page changes before going there
         scheduleTimeout = setTimeout(processSchedule, timeDiff + 100);
     } else {
-        // It's possible this entire section is vulnerable to the page refreshing from another script
-        // Difficult to test, just keep in mind for future debugging
-        var nextWebsite = scheduleList[0];
-        scheduleList.splice(0,2);
-        sessionStorage.setItem("scheduleStorage",scheduleString());
-        window.location.assign(nextWebsite);
+        gotoNextWebsite();
     }
+}
+
+function gotoNextWebsite() {
+    // It's possible this entire section is vulnerable to the page refreshing from another script
+    // Difficult to test, just keep in mind for future debugging
+    var nextWebsite = scheduleList[0];
+    scheduleList.splice(0,2);
+    sessionStorage.setItem("scheduleStorage",scheduleString());
+    window.location.assign(nextWebsite);
 }
