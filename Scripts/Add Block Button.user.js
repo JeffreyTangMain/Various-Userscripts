@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Add Block button
 // @namespace    https://github.com/
-// @version      1.0
+// @version      1.1
 // @description  Adds block button to comments and posts
 // @author       Main
 // @match        https://*.reddit.com/*
@@ -20,7 +20,8 @@ setInterval(addBlocks,1000);
 function addBlocks() {
     $(".tagline .author").each(function(index){
         if(this.closest("div").getElementsByClassName("flat-list").length != 0 && !this.closest("div").getElementsByClassName("flat-list")[0].lastChild.lastChild.className.includes("block_user-button")){
-            this.closest("div").getElementsByClassName("flat-list")[0].insertAdjacentHTML("beforeend",'<li><form class="toggle block_user-button " action="#" method="get"><input type="hidden" name="executed" value="blocked"><input type="hidden" name="account_id" value="'+this.className.split(" ")[2].replace("id-","")+'"><span class="option main active"><a href="#" class="togglebutton access-required" onclick="return toggle(this)">block user</a></span><span class="option error">are you sure?  <a href="javascript:void(0)" class="yes" onclick="change_state(this, &quot;block_user&quot;, null, undefined, null)">yes</a> / <a href="javascript:void(0)" class="no" onclick="return toggle(this)">no</a></span></form></li>');
+            let id = this.className.split(" ").find((element) => element.includes("id-")).replace("id-","");
+            this.closest("div").getElementsByClassName("flat-list")[0].insertAdjacentHTML("beforeend",'<li><form class="toggle block_user-button " action="#" method="get"><input type="hidden" name="executed" value="blocked"><input type="hidden" name="account_id" value="'+id+'"><span class="option main active"><a href="#" class="togglebutton access-required" onclick="return toggle(this)">block '+id+'</a></span><span class="option error">are you sure?  <a href="javascript:void(0)" class="yes" onclick="change_state(this, &quot;block_user&quot;, null, undefined, null)">yes</a> / <a href="javascript:void(0)" class="no" onclick="return toggle(this)">no</a></span></form></li>');
         }
     });
 }
