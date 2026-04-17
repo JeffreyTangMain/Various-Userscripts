@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.2.0
+// @version      1.2.1
 // @description  Queue a list of streams to open at specific times.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -37,13 +37,14 @@ if(!sessionStorageNull) {
 
 function grabSchedule(string) {
     // Toggle away the input box if this option is clicked again
-    if(document.getElementById("TwitchScheduleGrabber")) {
-        document.getElementById("TwitchScheduleGrabber").remove();
+    if(document.getElementById("TwitchScheduleOuterWrapper")) {
+        document.getElementById("TwitchScheduleOuterWrapper").remove();
         return;
     }
 
     var outer = document.createElement('div');
     outer.style = "position:fixed; height:40rem; width:80rem; left:12%; top:15%; transform:translate(-12%,-15%); z-index:2147483647; display:inline-block;";
+    outer.id = 'TwitchScheduleOuterWrapper';
 
     var box = document.createElement('textarea');
     box.type = 'text';
@@ -135,7 +136,7 @@ function readSchedule() {
     // It would be smarter to make sure there's no empty elements at the end
     // But it's also user error to include empty elements, so no fix is implemented at the moment
     scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
-    document.getElementById("TwitchScheduleGrabber").remove();
+    document.getElementById("TwitchScheduleOuterWrapper").remove();
     sessionStorage.setItem("scheduleStorage",scheduleString());
     clearTimeout(scheduleTimeout);
     processSchedule();
