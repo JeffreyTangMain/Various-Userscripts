@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.2.1
+// @version      1.2.2
 // @description  Queue a list of streams to open at specific times.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -19,7 +19,7 @@ var currentDate = new Date();
 var currentDateString = currentDate.toLocaleDateString("en-CA");
 // Date.parse format: 2025-10-03T11:00:00 (12 hour format impossible)
 // Date.getTime format: 2025-10-03 2:00:00 PM (24 hour format possible)
-var scheduleList = ["https://www.twitch.tv/twitch/about",currentDateString + " 1:00:00 PM"];
+var scheduleList = [window.location.href,currentDateString + currentTimeString("roundup")];
 var slicedSchedule;
 var joiner = ",";
 // This is set by processSchedule to be cleared by readSchedule if the schedule is ever updated
@@ -54,7 +54,10 @@ function grabSchedule(string) {
     box.style = "height:40rem; width:80rem; display:block; resize:both; box-sizing: border-box; padding: 2em";
     box.id = 'TwitchScheduleGrabber';
 
-    outer.appendChild(buttonAdder("Duplicate Final Lines", duplicateLine));
+    //outer.appendChild(buttonAdder("Duplicate Final Lines", duplicateLine));
+    outer.appendChild(buttonAdder("Parse Link", parseLink));
+    outer.appendChild(buttonAdder("Return to Previous", returnToPrevious));
+    outer.appendChild(buttonAdder("Add Current Page", addCurrentPage));
     outer.appendChild(buttonAdder("Add Entry", addEntry));
     outer.appendChild(buttonAdder("Remove Entry", removeEntry));
     outer.appendChild(buttonAdder("Toggle AM/PM", toggleAMPM));
@@ -90,23 +93,71 @@ function timeAdder(hours, minutes, seconds) {
     document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
 }
 
+function parseLink() {
+    scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
+    if(scheduleList.length < 2) return null;
+    var nearestLink = scheduleList.at(-2);
+    if(nearestLink.includes("twitch.tv/directory/category")) {
+        //https://www.twitch.tv/directory/category/example?filter=drops&sort=VIEWER_COUNT
+        nearestLink = nearestLink.split("?")[0] + "?filter=drops&sort=VIEWER_COUNT";
+    } else if(nearestLink.includes("www.twitch.tv/")) {
+        //https://www.twitch.tv/example/about
+        nearestLink += "/about";
+    }
+    scheduleList.splice(-2,1,nearestLink);
+    document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
+}
+
 function duplicateLine() {
     scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
+    if(scheduleList.length < 2) return null;
     scheduleList.push(...scheduleList.slice(-2));
+    document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
+}
+
+function returnToPrevious() {
+    scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
+    if(scheduleList.length < 4) return null;
+
+    var previousTime = document.getElementById('TwitchScheduleGrabber').value.split("\n").at(-1).split(" ");
+    previousTime = " " + previousTime.at(-2) + " " + previousTime.at(-1);
+    var defaultLink = window.location.href;
+    defaultLink = document.getElementById('TwitchScheduleGrabber').value.split("\n").at(-4);
+    scheduleList.push(...[defaultLink,currentDateString + previousTime]);
+    document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
+}
+
+function addCurrentPage() {
+    scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
+    var previousTime = document.getElementById('TwitchScheduleGrabber').value.split("\n").at(-1).split(" ");
+    var defaultLink = window.location.href;
+    if(scheduleList.length < 2) {
+        previousTime = currentTimeString("roundup");
+        scheduleList = [defaultLink,currentDateString + previousTime];
+    } else {
+        previousTime = " " + previousTime.at(-2) + " " + previousTime.at(-1);
+        scheduleList.push(...[defaultLink,currentDateString + previousTime]);
+    }
     document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
 }
 
 function addEntry() {
     scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
-    var defaultLink = "https://www.twitch.tv/twitch/about";
+    var previousTime = document.getElementById('TwitchScheduleGrabber').value.split("\n").at(-1).split(" ");
+    if(previousTime.length < 2) {
+        previousTime = currentTimeString("roundup");
+    } else {
+        previousTime = " " + previousTime.at(-2) + " " + previousTime.at(-1);
+    }
+    var defaultLink = window.location.href;
     navigator.clipboard.readText().then(text => {
         if(isValidHttpUrl(text) && !text.includes('\n')) {
             defaultLink = text;
         }
         if(scheduleList.length < 2) {
-            scheduleList = [defaultLink,currentDateString + " 1:00:00 PM"];
+            scheduleList = [defaultLink,currentDateString + previousTime];
         } else {
-            scheduleList.push(...[defaultLink,currentDateString + " 1:00:00 PM"]);
+            scheduleList.push(...[defaultLink,currentDateString + previousTime]);
         }
         document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
     })
@@ -122,6 +173,7 @@ function toggleAMPM() {
     // Grabs the final element, which should have a time
     // Then makes another list out of that to get the AM/PM ending
     scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
+    if(scheduleList.length < 2) return null;
     var scheduleEntry = scheduleList[scheduleList.length - 1].split(" ");
     if(scheduleEntry[scheduleEntry.length - 1].includes("AM")) {
         scheduleEntry[scheduleEntry.length - 1] = "PM";
@@ -174,6 +226,25 @@ function gotoNextWebsite() {
     scheduleList.splice(0,2);
     sessionStorage.setItem("scheduleStorage",scheduleString());
     window.location.assign(nextWebsite);
+}
+
+function currentTimeString(opts) {
+    //" 1:00:00 PM"
+    var newCurrentTime = new Date();
+    if(opts.includes('rounddown')) {
+        return " " + newCurrentTime.getHours() + ":00:00 " + newCurrentTime.toLocaleTimeString("en").split(" ").at(-1);
+    } else if(opts.includes('roundup')) {
+        newCurrentTime.setHours(newCurrentTime.getHours() + 1);
+        return " " + newCurrentTime.getHours() + ":00:00 " + newCurrentTime.toLocaleTimeString("en").split(" ").at(-1);
+    } else if(opts.includes('round')) {
+        if(newCurrentTime.getMinutes() >= 30) {
+            newCurrentTime.setHours(newCurrentTime.getHours() + 1);
+        }
+        return " " + newCurrentTime.getHours() + ":00:00 " + newCurrentTime.toLocaleTimeString("en").split(" ").at(-1);
+    } else {
+        newCurrentTime = newCurrentTime.toLocaleTimeString("en");
+        return " " + newCurrentTime;
+    }
 }
 
 function isValidHttpUrl(string) {
