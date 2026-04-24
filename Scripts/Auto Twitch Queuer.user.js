@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.2.4
+// @version      1.2.5
 // @description  Queue a list of streams to open at specific times.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -234,23 +234,30 @@ function gotoNextWebsite() {
     window.location.assign(nextWebsite);
 }
 
+// Only use this by setting it to a variable before you use the string that comes out of it,
+// that will let it properly set currentDate and currentDateString, done this way to
+// reduce the amount of code editing needed to fix this small bug when you round to another day
 function currentTimeString(opts) {
     //" 1:00:00 PM"
     var newCurrentTime = new Date();
+    //newCurrentTime.setHours(23);
+    var newCurrentTimeString = "";
     if(opts.includes('rounddown')) {
-        return " " + newCurrentTime.toLocaleTimeString("en").split(" ")[0].split(":")[0] + ":00:00 " + newCurrentTime.toLocaleTimeString("en").split(" ").at(-1);
+        newCurrentTimeString = " " + newCurrentTime.toLocaleTimeString("en").split(" ")[0].split(":")[0] + ":00:00 " + newCurrentTime.toLocaleTimeString("en").split(" ").at(-1);
     } else if(opts.includes('roundup')) {
         newCurrentTime.setHours(newCurrentTime.getHours() + 1);
-        return " " + newCurrentTime.toLocaleTimeString("en").split(" ")[0].split(":")[0] + ":00:00 " + newCurrentTime.toLocaleTimeString("en").split(" ").at(-1);
+        newCurrentTimeString = " " + newCurrentTime.toLocaleTimeString("en").split(" ")[0].split(":")[0] + ":00:00 " + newCurrentTime.toLocaleTimeString("en").split(" ").at(-1);
     } else if(opts.includes('round')) {
         if(newCurrentTime.getMinutes() >= 30) {
             newCurrentTime.setHours(newCurrentTime.getHours() + 1);
         }
-        return " " + newCurrentTime.toLocaleTimeString("en").split(" ")[0].split(":")[0] + ":00:00 " + newCurrentTime.toLocaleTimeString("en").split(" ").at(-1);
+        newCurrentTimeString = " " + newCurrentTime.toLocaleTimeString("en").split(" ")[0].split(":")[0] + ":00:00 " + newCurrentTime.toLocaleTimeString("en").split(" ").at(-1);
     } else {
-        newCurrentTime = newCurrentTime.toLocaleTimeString("en");
-        return " " + newCurrentTime;
+        newCurrentTimeString = " " + newCurrentTime.toLocaleTimeString("en");
     }
+    currentDate = newCurrentTime;
+    currentDateString = currentDate.toLocaleDateString("en-CA");
+    return newCurrentTimeString;
 }
 
 function isValidHttpUrl(string) {
