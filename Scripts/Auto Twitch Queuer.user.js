@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.2.3
+// @version      1.2.4
 // @description  Queue a list of streams to open at specific times.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -19,7 +19,8 @@ var currentDate = new Date();
 var currentDateString = currentDate.toLocaleDateString("en-CA");
 // Date.parse format: 2025-10-03T11:00:00 (12 hour format impossible)
 // Date.getTime format: 2025-10-03 2:00:00 PM (24 hour format possible)
-var scheduleList = [window.location.href,currentDateString + currentTimeString("roundup")];
+// window.location.href,currentDateString + currentTimeString("roundup")
+var scheduleList = [];
 var slicedSchedule;
 var joiner = ",";
 // This is set by processSchedule to be cleared by readSchedule if the schedule is ever updated
@@ -68,6 +69,11 @@ function grabSchedule(string) {
     //outer.appendChild(buttonAdder("Debug", debug));
     outer.appendChild(box);
     document.body.prepend(outer);
+
+    // Fills the schedule with an entry on startup and if it's ever emptied again
+    if(scheduleList.length < 2) {
+        addEntry();
+    }
 }
 
 function debug() {
