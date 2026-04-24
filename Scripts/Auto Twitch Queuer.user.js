@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.2.5
+// @version      1.2.6
 // @description  Queue a list of streams to open at specific times.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -9,8 +9,7 @@
 // ==/UserScript==
 // Should work on any website that it's enabled to work on using @match.
 
-GM_registerMenuCommand("Grab Schedule", grabSchedule);
-GM_registerMenuCommand("Read Schedule", readSchedule);
+GM_registerMenuCommand("Open Schedule", grabSchedule);
 GM_registerMenuCommand("Next In Queue", nextinQueue);
 
 var currentDate = new Date();
@@ -44,7 +43,7 @@ function grabSchedule(string) {
     }
 
     var outer = document.createElement('div');
-    outer.style = "position:fixed; height:40rem; width:80rem; left:12%; top:15%; transform:translate(-12%,-15%); z-index:2147483647; display:inline-block;";
+    outer.style = "position:fixed; height:40rem; width:100rem; left:12%; top:15%; transform:translate(-12%,-15%); z-index:2147483647; display:inline-block;";
     outer.id = 'TwitchScheduleOuterWrapper';
 
     var box = document.createElement('textarea');
@@ -52,7 +51,7 @@ function grabSchedule(string) {
     // This'll get updated by processSchedule if you've run the script earlier
     // Showing you what channels you've scheduled already
     box.value = scheduleList.join("\n");
-    box.style = "height:40rem; width:80rem; display:block; resize:both; box-sizing: border-box; padding: 2em";
+    box.style = "height:40rem; width:100rem; display:block; resize:both; box-sizing: border-box; padding: 2em";
     box.id = 'TwitchScheduleGrabber';
 
     //outer.appendChild(buttonAdder("Duplicate Final Lines", duplicateLine));
@@ -66,6 +65,9 @@ function grabSchedule(string) {
     outer.appendChild(buttonAdder("+30 Minutes", () => timeAdder(0,30,0)));
     outer.appendChild(buttonAdder("-1 Hour", () => timeAdder(-1,0,0)));
     outer.appendChild(buttonAdder("-30 Minutes", () => timeAdder(0,-30,0)));
+    outer.appendChild(buttonAdder("Run Queue", readSchedule));
+    outer.appendChild(buttonAdder("Next Queued", nextinQueue));
+    outer.appendChild(buttonAdder("Close", grabSchedule));
     //outer.appendChild(buttonAdder("Debug", debug));
     outer.appendChild(box);
     document.body.prepend(outer);
