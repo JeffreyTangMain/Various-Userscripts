@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.2.6
+// @version      1.2.7
 // @description  Queue a list of streams to open at specific times.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -11,6 +11,7 @@
 
 GM_registerMenuCommand("Open Schedule", grabSchedule);
 GM_registerMenuCommand("Next In Queue", nextinQueue);
+GM_registerMenuCommand("Cancel Schedule", cancelQueue);
 
 var currentDate = new Date();
 // getMonth is zero-indexed, so +1 to get the real month
@@ -32,6 +33,8 @@ if(!sessionStorageNull) {
         // Only runs if you've started the script earlier
         // >= 2 because session storage with just "" checked this way returns length 1
         processSchedule();
+    } else {
+        sessionStorage.removeItem("scheduleStorage");
     }
 }
 
@@ -43,7 +46,7 @@ function grabSchedule(string) {
     }
 
     var outer = document.createElement('div');
-    outer.style = "position:fixed; height:40rem; width:100rem; left:12%; top:15%; transform:translate(-12%,-15%); z-index:2147483647; display:inline-block;";
+    outer.style = "position:fixed; height:40rem; width:100rem; left:12%; top:15%; transform:translate(-12%,-15%); z-index:99999; display:inline-block;";
     outer.id = 'TwitchScheduleOuterWrapper';
 
     var box = document.createElement('textarea');
@@ -196,9 +199,13 @@ function readSchedule() {
     // It would be smarter to make sure there's no empty elements at the end
     // But it's also user error to include empty elements, so no fix is implemented at the moment
     scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
+    if(scheduleList.length % 2 != 0) {
+        popupText("Odd Queue Count? Possible Malformed Queue");
+        return;
+    }
+    clearTimeout(scheduleTimeout);
     document.getElementById("TwitchScheduleOuterWrapper").remove();
     sessionStorage.setItem("scheduleStorage",scheduleString());
-    clearTimeout(scheduleTimeout);
     processSchedule();
 }
 
@@ -221,6 +228,9 @@ function processSchedule() {
     var timeDiff = dateParser - Date.now();
     if(timeDiff > 0) {
         // +100ms is a tiny amount of buffer time to possibly wait for any page changes before going there
+        var hours = timeDiff / 1000 / 60 / 60;
+        hours = Math.round(hours * 100) / 100;
+        popupText("Next in Queue: " + scheduleList[0] + " in ~" + hours + " hours");
         scheduleTimeout = setTimeout(processSchedule, timeDiff + 100);
     } else {
         gotoNextWebsite();
@@ -230,10 +240,19 @@ function processSchedule() {
 function gotoNextWebsite() {
     // It's possible this entire section is vulnerable to the page refreshing from another script
     // Difficult to test, just keep in mind for future debugging
+    clearTimeout(scheduleTimeout);
     var nextWebsite = scheduleList[0];
     scheduleList.splice(0,2);
     sessionStorage.setItem("scheduleStorage",scheduleString());
     window.location.assign(nextWebsite);
+}
+
+function cancelQueue() {
+    clearTimeout(scheduleTimeout);
+    document.getElementById("TwitchScheduleOuterWrapper")?.remove();
+    sessionStorage.removeItem("scheduleStorage");
+    scheduleList = [];
+    popupText("Queue Canceled");
 }
 
 // Only use this by setting it to a variable before you use the string that comes out of it,
@@ -272,4 +291,42 @@ function isValidHttpUrl(string) {
     }
 
     return url.protocol === "http:" || url.protocol === "https:";
+}
+
+function popupText(string) {
+    removeConfirmPopup();
+
+    var box = document.createElement("div");
+    box.id = "userscriptPopupWindow";
+    box.textContent = string;
+    box.style.cssText = "position:fixed; top:16px; left:16px; z-index:999991; max-width:300px; padding:10px 14px; background-color:#333; color:#fff; border-radius:6px; font-size:13px; line-height:1.5; word-wrap:break-word; white-space:normal; cursor:pointer; transform:translateX(calc(-100% - 16px)); transition:transform 0.35s ease; box-sizing:border-box;";
+
+    document.body.appendChild(box);
+
+    requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+            box.style.transform = "translateX(0)";
+        });
+    });
+
+    function slideOut() {
+        box.style.transform = "translateX(calc(-100% - 16px))";
+        box.addEventListener("transitionend", function () {
+            if (box.parentNode) box.parentNode.removeChild(box);
+        }, { once: true });
+    }
+
+    var autoRemove = setTimeout(slideOut, 4000);
+
+    box.addEventListener("click", function () {
+        clearTimeout(autoRemove);
+        slideOut();
+    }, { once: true });
+}
+
+function removeConfirmPopup() {
+    var existing = document.getElementById("userscriptPopupWindow");
+    if (existing && existing.parentNode) {
+        existing.parentNode.removeChild(existing)
+    }
 }
