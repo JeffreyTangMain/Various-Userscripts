@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.2.8
+// @version      1.2.9
 // @description  Queue a list of streams to open at specific times.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -108,10 +108,10 @@ function parseLink() {
     scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
     if(scheduleList.length < 2) return null;
     var nearestLink = scheduleList.at(-2);
-    if(nearestLink.includes("twitch.tv/directory/category")) {
+    if(nearestLink.includes("twitch.tv/directory/category") && !nearestLink.includes("?filter=drops&sort=VIEWER_COUNT")) {
         //https://www.twitch.tv/directory/category/example?filter=drops&sort=VIEWER_COUNT
         nearestLink = nearestLink.split("?")[0] + "?filter=drops&sort=VIEWER_COUNT";
-    } else if(nearestLink.includes("twitch.tv/")) {
+    } else if(nearestLink.includes("twitch.tv/") && !nearestLink.includes("/about") && !nearestLink.includes("?filter=drops&sort=VIEWER_COUNT")) {
         //https://www.twitch.tv/example/about
         nearestLink += "/about";
     }
