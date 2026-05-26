@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.10.2
+// @version      3.10.1
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -10,6 +10,7 @@
 // @grant        GM_addStyle
 // @grant        GM_info
 // @require      http://code.jquery.com/jquery-3.4.1.min.js
+// @noframes
 // ==/UserScript==
 // Documenting globals for JSHint to not throw an error for JQuery's $ function
 /* globals $ */
