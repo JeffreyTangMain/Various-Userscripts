@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.6.0
+// @version      1.7.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -15,8 +15,7 @@ GM_registerMenuCommand("Open Schedule", grabSchedule);
 GM_registerMenuCommand("Next In Queue", nextinQueue);
 GM_registerMenuCommand("Cancel Schedule", cancelQueue);
 GM_registerMenuCommand("Auto Farm Campaigns", autoFarmCampaignsToggle);
-GM_registerMenuCommand("Edit Campaigns Priority", editCampaignsPriority);
-GM_registerMenuCommand("Drops Tracker", openDropsTracker);
+GM_registerMenuCommand("Campaign Manager", openCampaignManager);
 
 var currentDate = new Date();
 var currentDateString = currentDate.toLocaleDateString("en-CA");
@@ -255,108 +254,249 @@ function calculateTimeRemaining(endDateString) {
     return diffMinutes;
 }
 
-function openDropsTracker() {
-    if(document.getElementById("DropsTrackerOuterWrapper")) {
-        document.getElementById("DropsTrackerOuterWrapper").remove();
+function openCampaignManager() {
+    if(document.getElementById("CampaignManagerWrapper")) {
+        document.getElementById("CampaignManagerWrapper").remove();
         return;
     }
+
+    if (!document.getElementById('atq-cm-style')) {
+        var style = document.createElement('style');
+        style.id = 'atq-cm-style';
+        style.textContent = `
+            #CampaignManagerWrapper, #CampaignManagerWrapper * { box-sizing: border-box; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+            #CampaignManagerWrapper { position:fixed; width:60rem; max-height:calc(100vh - 3rem); left:50%; top:50%; transform:translate(-50%,-50%); z-index:99999; display:flex; flex-direction:column; background:#18181b; padding:16px; border-radius:10px; box-shadow:0 12px 48px rgba(0,0,0,0.8); color:#efeff1; }
+            .atq-titlebar { display:flex; align-items:center; margin-bottom:12px; }
+            .atq-title { font-size:1.05rem; font-weight:700; color:#efeff1; letter-spacing:0.04em; text-transform:uppercase; flex:1; }
+            .atq-settings { background:#0e0e10; border:1px solid #2a2a35; border-radius:6px; padding:9px 12px; margin-bottom:10px; display:flex; flex-direction:column; gap:7px; }
+            .atq-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+            .atq-label { font-size:0.88rem; font-weight:500; color:#adadb8; white-space:nowrap; }
+            .atq-input { background:#18181b; border:1px solid #3a3a4a; border-radius:4px; color:#efeff1; font-size:0.92rem; padding:4px 7px; outline:none; transition:border-color 0.15s; }
+            .atq-input:focus { border-color:#9147ff; }
+            .atq-input-num { width:5.5rem; text-align:center; }
+            .atq-input-url { flex:1; min-width:0; }
+            .atq-tabs { display:flex; border-bottom:1px solid #2a2a35; margin-bottom:8px; gap:2px; }
+            .atq-tab { padding:6px 16px; cursor:pointer; font-size:0.88rem; font-weight:700; color:#adadb8; border:none; background:none; border-bottom:2px solid transparent; margin-bottom:-1px; transition:color 0.15s, border-color 0.15s; letter-spacing:0.06em; text-transform:uppercase; }
+            .atq-tab:hover { color:#efeff1; }
+            .atq-tab.atq-active { color:#9147ff; border-bottom-color:#9147ff; }
+            .atq-content { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:3px; margin-bottom:8px; }
+            .atq-content::-webkit-scrollbar { width:4px; }
+            .atq-content::-webkit-scrollbar-track { background:transparent; }
+            .atq-content::-webkit-scrollbar-thumb { background:#3a3a4a; border-radius:2px; }
+            .atq-empty { color:#adadb8; font-size:0.92rem; text-align:center; padding:2rem 1rem; }
+            .atq-item { display:flex; align-items:center; gap:6px; background:#0e0e10; padding:7px 10px; border-radius:6px; border:1px solid transparent; transition:border-color 0.1s; }
+            .atq-item:hover { border-color:#2a2a35; }
+            .atq-game-header { font-size:0.78rem; font-weight:700; color:#9147ff; text-transform:uppercase; letter-spacing:0.1em; padding:10px 4px 3px; }
+            .atq-item-label { flex:1; font-size:0.92rem; color:#efeff1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+            .atq-item-label.done { color:#5a5a6e; text-decoration:line-through; }
+            .atq-btn { cursor:pointer; border:none; border-radius:4px; font-size:0.88rem; font-weight:700; padding:5px 12px; transition:background 0.12s, color 0.12s; white-space:nowrap; letter-spacing:0.03em; background:#2a2a35; color:#adadb8; }
+            .atq-btn:hover { background:#3a3a4a; color:#efeff1; }
+            .atq-btn-primary { background:#9147ff; color:#fff; }
+            .atq-btn-primary:hover { background:#7d2cf5; color:#fff; }
+            .atq-btn-danger { background:#2a1010; color:#e06060; }
+            .atq-btn-danger:hover { background:#8b2020; color:#fff; }
+            .atq-btn-ghost { background:transparent; color:#adadb8; padding:3px 8px; font-size:1rem; }
+            .atq-btn-ghost:hover { background:#2a2a35; color:#efeff1; }
+            .atq-btn-sm { padding:4px 9px; font-size:0.82rem; }
+            .atq-btn-icon { padding:4px 8px; font-size:0.82rem; min-width:28px; display:inline-flex; align-items:center; justify-content:center; }
+            .atq-footer { display:flex; align-items:center; gap:6px; padding-top:10px; border-top:1px solid #2a2a35; }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function mkBtn(text, onClick, cls) {
+        var b = document.createElement('button');
+        b.textContent = text;
+        b.className = cls !== undefined ? cls : 'atq-btn';
+        b.addEventListener('click', onClick);
+        return b;
+    }
+    function mkInput(type, value, extraCls) {
+        var i = document.createElement('input');
+        i.type = type;
+        i.value = value;
+        i.className = 'atq-input' + (extraCls ? ' ' + extraCls : '');
+        return i;
+    }
+    function mkLabel(text) {
+        var s = document.createElement('span');
+        s.className = 'atq-label';
+        s.textContent = text;
+        return s;
+    }
+
+    var list = getDropList();
+    var settings = getDropSettings();
+
     var outer = document.createElement('div');
-    outer.style = "position:fixed; height:40rem; width:50rem; left:12%; top:15%; transform:translate(-12%,-15%); z-index:99999; display:flex; flex-direction:column; background:#222; padding:1rem; box-sizing:border-box; border-radius:6px;";
-    outer.id = 'DropsTrackerOuterWrapper';
-    var title = document.createElement('h2');
-    title.textContent = 'Drops Tracker';
-    title.style = "color:#fff; margin:0 0 0.5rem 0;";
-    outer.appendChild(title);
-    var itemsContainer = document.createElement('div');
-    itemsContainer.style = "flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:0.5rem; margin-bottom:0.5rem;";
-    function renderTrackerItems() {
-        itemsContainer.innerHTML = '';
-        var currentTracker = getDropsTracker();
-        if (!currentTracker || typeof currentTracker !== 'object') {
-            currentTracker = {};
-            setDropsTracker(currentTracker);
+    outer.id = 'CampaignManagerWrapper';
+
+    var titlebar = document.createElement('div');
+    titlebar.className = 'atq-titlebar';
+    var titleEl = document.createElement('span');
+    titleEl.className = 'atq-title';
+    titleEl.textContent = 'Campaign Manager';
+    titlebar.appendChild(titleEl);
+    titlebar.appendChild(mkBtn('✕', function() { outer.remove(); }, 'atq-btn atq-btn-ghost'));
+    outer.appendChild(titlebar);
+
+    var settingsDiv = document.createElement('div');
+    settingsDiv.className = 'atq-settings';
+
+    var paddingInput = mkInput('number', settings.paddingMinutes || 2, 'atq-input-num');
+    var checkInput = mkInput('number', settings.checkIntervalMinutes || 10, 'atq-input-num');
+    var r1 = document.createElement('div');
+    r1.className = 'atq-row';
+    r1.appendChild(mkLabel('Padding min')); r1.appendChild(paddingInput);
+    r1.appendChild(mkLabel('Check interval min')); r1.appendChild(checkInput);
+
+    var fallbackInput = mkInput('text', settings.fallbackChannel || '', 'atq-input-url');
+    fallbackInput.placeholder = 'Fallback channel URL…';
+    var fallbackMinInput = mkInput('number', settings.fallbackMinutes || 30, 'atq-input-num');
+    var r2 = document.createElement('div');
+    r2.className = 'atq-row';
+    r2.appendChild(mkLabel('Fallback')); r2.appendChild(fallbackInput);
+    r2.appendChild(mkLabel('for')); r2.appendChild(fallbackMinInput); r2.appendChild(mkLabel('min'));
+
+    settingsDiv.appendChild(r1);
+    settingsDiv.appendChild(r2);
+    outer.appendChild(settingsDiv);
+
+    var tabsDiv = document.createElement('div');
+    tabsDiv.className = 'atq-tabs';
+    var priorityTabBtn = mkBtn('Priority', function() { setTab('priority'); }, 'atq-tab');
+    var trackerTabBtn = mkBtn('Tracker', function() { setTab('tracker'); }, 'atq-tab');
+    tabsDiv.appendChild(priorityTabBtn);
+    tabsDiv.appendChild(trackerTabBtn);
+    outer.appendChild(tabsDiv);
+
+    var contentArea = document.createElement('div');
+    contentArea.className = 'atq-content';
+    outer.appendChild(contentArea);
+
+    var footer = document.createElement('div');
+    footer.className = 'atq-footer';
+    outer.appendChild(footer);
+
+    function saveSettings() {
+        GM_setValue('dropGameList', list);
+        GM_setValue('dropSettings', {
+            paddingMinutes: parseInt(paddingInput.value) || 2,
+            checkIntervalMinutes: parseInt(checkInput.value) || 10,
+            fallbackChannel: fallbackInput.value.trim(),
+            fallbackMinutes: parseInt(fallbackMinInput.value) || 30
+        });
+        popupText('Settings saved.');
+    }
+
+    function renderPriority() {
+        contentArea.innerHTML = '';
+        if (list.length === 0) {
+            var empty = document.createElement('div');
+            empty.className = 'atq-empty';
+            empty.textContent = 'No games in priority list. Use the + buttons on the Drops Campaigns page to add games.';
+            contentArea.appendChild(empty);
+            return;
         }
-        var gameNames = Object.keys(currentTracker).sort();
+        list.forEach(function(game, idx) {
+            var item = document.createElement('div');
+            item.className = 'atq-item';
+            item.appendChild(mkBtn('▲', function() {
+                if(idx === 0) return;
+                var tmp = list[idx - 1]; list[idx - 1] = list[idx]; list[idx] = tmp;
+                renderPriority();
+            }, 'atq-btn atq-btn-icon'));
+            item.appendChild(mkBtn('▼', function() {
+                if(idx === list.length - 1) return;
+                var tmp = list[idx + 1]; list[idx + 1] = list[idx]; list[idx] = tmp;
+                renderPriority();
+            }, 'atq-btn atq-btn-icon'));
+            var lbl = document.createElement('span');
+            lbl.className = 'atq-item-label';
+            lbl.textContent = (idx + 1) + '. ' + game.name;
+            item.appendChild(lbl);
+            item.appendChild(mkBtn('✕', function() {
+                var name = game.name;
+                list.splice(idx, 1);
+                renderPriority();
+                popupText('Removed: ' + name);
+            }, 'atq-btn atq-btn-icon atq-btn-danger'));
+            contentArea.appendChild(item);
+        });
+    }
+
+    function renderTracker() {
+        contentArea.innerHTML = '';
+        var tracker = getDropsTracker();
+        if (!tracker || typeof tracker !== 'object') { tracker = {}; setDropsTracker(tracker); }
+        var gameNames = Object.keys(tracker).sort();
         if (gameNames.length === 0) {
-            var emptyMsg = document.createElement('div');
-            emptyMsg.textContent = 'No campaigns tracked yet. Start auto-farming to populate.';
-            emptyMsg.style = "color:#999; padding:1rem; text-align:center;";
-            itemsContainer.appendChild(emptyMsg);
+            var empty = document.createElement('div');
+            empty.className = 'atq-empty';
+            empty.textContent = 'No campaigns tracked yet. Start auto-farming to populate.';
+            contentArea.appendChild(empty);
             return;
         }
         gameNames.forEach(function(gameName) {
-            var gameHeader = document.createElement('div');
-            gameHeader.style = "color:#fff; font-size:1.1rem; font-weight:bold; padding:0.25rem 0; margin-top:0.5rem;";
-            gameHeader.textContent = gameName;
-            itemsContainer.appendChild(gameHeader);
-            var campaigns = currentTracker[gameName];
-            if (!Array.isArray(campaigns)) {
-                console.log("Warning: campaigns for " + gameName + " is not an array, resetting");
-                currentTracker[gameName] = [];
-                campaigns = [];
-            }
+            var gh = document.createElement('div');
+            gh.className = 'atq-game-header';
+            gh.textContent = gameName;
+            contentArea.appendChild(gh);
+            var campaigns = tracker[gameName];
+            if (!Array.isArray(campaigns)) { tracker[gameName] = []; campaigns = []; }
             campaigns.forEach(function(campaign) {
-                var row = document.createElement('div');
-                row.style = "display:flex; align-items:center; gap:0.5rem; background:#333; padding:0.25rem 0.5rem; border-radius:4px; color:#fff; font-size:0.9rem;";
-                var status = campaign.completed ? '✅' : '⏳';
-                var label = document.createElement('span');
-                label.textContent = status + ' ' + campaign.name + ' | End: ' + campaign.endDate;
-                label.style = "flex:1;";
-                var toggleBtn = buttonAdder(campaign.completed ? 'Unmark' : 'Mark Done', function() {
-                    markCampaignCompleted(gameName, campaign.name, !campaign.completed);
-                    renderTrackerItems();
-                });
-                var deleteBtn = buttonAdder('Delete', function() {
-                    deleteCampaignFromTracker(gameName, campaign.name);
-                    renderTrackerItems();
-                });
-                row.appendChild(label);
-                row.appendChild(toggleBtn);
-                row.appendChild(deleteBtn);
-                itemsContainer.appendChild(row);
+                var item = document.createElement('div');
+                item.className = 'atq-item';
+                var lbl = document.createElement('span');
+                lbl.className = 'atq-item-label' + (campaign.completed ? ' done' : '');
+                lbl.textContent = campaign.name + '  —  ends ' + campaign.endDate;
+                item.appendChild(mkBtn(campaign.completed ? 'Unmark' : 'Mark Done', function() {
+                    var newState = !campaign.completed;
+                    markCampaignCompleted(gameName, campaign.name, newState);
+                    popupText((newState ? 'Completed: ' : 'Unmarked: ') + campaign.name);
+                    renderTracker();
+                }, 'atq-btn atq-btn-sm'));
+                item.appendChild(lbl);
+                item.appendChild(mkBtn('✕', function() {
+                    var name = campaign.name;
+                    deleteCampaignFromTracker(gameName, name);
+                    popupText('Deleted: ' + name);
+                    renderTracker();
+                }, 'atq-btn atq-btn-icon atq-btn-danger'));
+                contentArea.appendChild(item);
             });
         });
     }
-    renderTrackerItems();
-    var btnRow = document.createElement('div');
-    btnRow.style = "display:flex; gap:0.5rem;";
-    btnRow.appendChild(buttonAdder("Delete All", function() {
-        if (confirm("Delete all tracked campaigns?")) {
-            deleteAllFromTracker();
-            renderTrackerItems();
+
+    function setTab(tab) {
+        priorityTabBtn.classList.toggle('atq-active', tab === 'priority');
+        trackerTabBtn.classList.toggle('atq-active', tab === 'tracker');
+        footer.innerHTML = '';
+        if (tab === 'priority') {
+            renderPriority();
+            footer.appendChild(mkBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
+        } else {
+            renderTracker();
+            footer.appendChild(mkBtn('Delete Expired', function() {
+                var before = Object.values(getDropsTracker()).reduce(function(s, a) { return s + a.length; }, 0);
+                deleteExpiredFromTracker();
+                var after = Object.values(getDropsTracker()).reduce(function(s, a) { return s + a.length; }, 0);
+                var n = before - after;
+                renderTracker();
+                popupText(n > 0 ? 'Deleted ' + n + ' expired campaign' + (n !== 1 ? 's' : '') + '.' : 'No expired campaigns to delete.');
+            }, 'atq-btn atq-btn-sm'));
+            footer.appendChild(mkBtn('Delete All', function() {
+                if (confirm('Delete all tracked campaigns?')) {
+                    deleteAllFromTracker();
+                    renderTracker();
+                    popupText('All campaigns deleted.');
+                }
+            }, 'atq-btn atq-btn-sm atq-btn-danger'));
         }
-    }));
-    btnRow.appendChild(buttonAdder("Delete Expired", function() {
-        deleteExpiredFromTracker();
-        renderTrackerItems();
-    }));
-    btnRow.appendChild(buttonAdder("Refresh", function() {
-        renderTrackerItems();
-    }));
-    btnRow.appendChild(buttonAdder("Close", function() {
-        outer.remove();
-    }));
-    var fallbackRow = document.createElement('div');
-    fallbackRow.style = "display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; color:#fff; font-size:0.9rem;";
-    var fallbackLabel = document.createElement('span');
-    fallbackLabel.textContent = 'Fallback channel:';
-    fallbackLabel.style = "white-space:nowrap;";
-    var fallbackInput = document.createElement('input');
-    fallbackInput.type = 'text';
-    fallbackInput.value = getDropSettings().fallbackChannel || '';
-    fallbackInput.placeholder = 'https://www.twitch.tv/channel';
-    fallbackInput.style = "flex:1; font-size:0.9rem; background:#444; color:#fff; border:1px solid #666; border-radius:4px; padding:0 4px;";
-    fallbackRow.appendChild(fallbackLabel);
-    fallbackRow.appendChild(fallbackInput);
-    fallbackRow.appendChild(buttonAdder("Set", function() {
-        var settings = getDropSettings();
-        settings.fallbackChannel = fallbackInput.value.trim();
-        GM_setValue('dropSettings', settings);
-        popupText("Fallback channel saved.");
-    }));
-    outer.appendChild(itemsContainer);
-    outer.appendChild(fallbackRow);
-    outer.appendChild(btnRow);
+        footer.appendChild(mkBtn('Close', function() { outer.remove(); }, 'atq-btn'));
+    }
+
+    setTab('priority');
     document.body.prepend(outer);
 }
 
@@ -392,22 +532,31 @@ function renderDropButtons(campaignContainer) {
         var nameEl = row.querySelector('p');
         if(!nameEl) return;
         var gameName = nameEl.textContent.trim();
-        var btn = buttonAdder(getDropList().map(g => g.name).includes(gameName) ? "-" : "+", function(e) {
+        var header = row.querySelector('.accordion-header, [role="heading"]');
+        if(!header) return;
+        var btn = document.createElement('button');
+        btn.className = 'atq-drop-btn';
+        btn.style.cssText = "position:absolute; left:6px; top:50%; transform:translateY(-50%); z-index:9999; width:22px; height:22px; border:none; border-radius:4px; font-size:15px; font-weight:700; line-height:1; cursor:pointer; transition:background 0.12s, color 0.12s; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; display:flex; align-items:center; justify-content:center;";
+        updateDropBtn(btn, gameName);
+        btn.addEventListener('mouseenter', function() { btn.style.background = '#9147ff'; btn.style.color = '#fff'; });
+        btn.addEventListener('mouseleave', function() { updateDropBtn(btn, gameName); });
+        btn.addEventListener('click', function(e) {
             e.stopPropagation();
             toggleDropGame(gameName);
             updateDropBtn(btn, gameName);
         });
-        btn.classList.add('atq-drop-btn');
-        btn.style.cssText += "position:absolute; left:0; top:50%; transform:translateY(-50%); z-index:9999;";
-        row.style.position = 'relative';
-        var innerBtn = row.querySelector('button');
-        if(innerBtn) innerBtn.style.paddingLeft = '2.5rem';
-        row.appendChild(btn);
+        header.style.position = 'relative';
+        var accordionToggle = header.querySelector('button');
+        if(accordionToggle) accordionToggle.style.paddingLeft = '2.5rem';
+        header.appendChild(btn);
     });
 }
 
 function updateDropBtn(btn, gameName) {
-    btn.textContent = getDropList().map(g => g.name).includes(gameName) ? "-" : "+";
+    var inList = getDropList().some(g => g.name === gameName);
+    btn.textContent = inList ? '−' : '+';
+    btn.style.background = inList ? '#1a0a2e' : '#2a2a35';
+    btn.style.color = inList ? '#9147ff' : '#adadb8';
 }
 
 function getDropList() {
@@ -415,7 +564,7 @@ function getDropList() {
 }
 
 function getDropSettings() {
-    return GM_getValue('dropSettings', { defaultMinutes: 30, paddingMinutes: 2, checkIntervalMinutes: 10, fallbackChannel: '' });
+    return GM_getValue('dropSettings', { paddingMinutes: 2, checkIntervalMinutes: 10, fallbackChannel: '', fallbackMinutes: 30 });
 }
 
 function toggleDropGame(gameName) {
@@ -631,10 +780,7 @@ function queueCampaignStream(game, row, campaign, list, idx) {
     var settings = getDropSettings();
     var padding = settings.paddingMinutes;
     var remainingMinutes = calculateTimeRemaining(campaign.endDate);
-    var watchMinutes = Math.min(settings.defaultMinutes, remainingMinutes) + padding;
-    if (watchMinutes > remainingMinutes) {
-        watchMinutes = remainingMinutes;
-    }
+    var watchMinutes = remainingMinutes + padding;
     if(streamUrl.includes("twitch.tv/directory/category") && !streamUrl.includes("?filter=drops&sort=VIEWER_COUNT")) {
         streamUrl = streamUrl.split("?")[0] + "?filter=drops&sort=VIEWER_COUNT";
     } else if(!streamUrl.includes("/directory/category") && !streamUrl.includes("/about") && !streamUrl.includes("?filter=drops&sort=VIEWER_COUNT")) {
@@ -655,7 +801,7 @@ function queueCampaignStream(game, row, campaign, list, idx) {
 
 function queueFallbackChannel(channelUrl) {
     var settings = getDropSettings();
-    var watchMinutes = (settings.defaultMinutes || 30) + (settings.paddingMinutes || 2);
+    var watchMinutes = (settings.fallbackMinutes || 30) + (settings.paddingMinutes || 2);
     if(channelUrl.includes("twitch.tv/directory/category") && !channelUrl.includes("?filter=drops&sort=VIEWER_COUNT")) {
         channelUrl = channelUrl.split("?")[0] + "?filter=drops&sort=VIEWER_COUNT";
     } else if(!channelUrl.includes("/directory/category") && !channelUrl.includes("/about") && !channelUrl.includes("?filter=drops&sort=VIEWER_COUNT")) {
@@ -703,99 +849,6 @@ function startInventoryChecking() {
     }, checkIntervalMs);
 }
 
-function editCampaignsPriority() {
-    if(document.getElementById("TwitchPriorityOuterWrapper")) {
-        document.getElementById("TwitchPriorityOuterWrapper").remove();
-        return;
-    }
-    var list = getDropList();
-    var settings = getDropSettings();
-    var outer = document.createElement('div');
-    outer.style = "position:fixed; height:40rem; width:40rem; left:12%; top:15%; transform:translate(-12%,-15%); z-index:99999; display:flex; flex-direction:column; background:#222; padding:1rem; box-sizing:border-box; border-radius:6px;";
-    outer.id = 'TwitchPriorityOuterWrapper';
-    var globalRow = document.createElement('div');
-    globalRow.style = "display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; color:#fff; font-size:0.9rem; flex-wrap:wrap;";
-    var defaultLabel = document.createElement('span');
-    defaultLabel.textContent = 'Default min:';
-    var defaultInput = document.createElement('input');
-    defaultInput.type = 'number';
-    defaultInput.value = settings.defaultMinutes;
-    defaultInput.style = "width:4rem; font-size:0.9rem;";
-    var paddingLabel = document.createElement('span');
-    paddingLabel.textContent = 'Padding min:';
-    var paddingInput = document.createElement('input');
-    paddingInput.type = 'number';
-    paddingInput.value = settings.paddingMinutes;
-    paddingInput.style = "width:4rem; font-size:0.9rem;";
-    var checkLabel = document.createElement('span');
-    checkLabel.textContent = 'Check interval min:';
-    var checkInput = document.createElement('input');
-    checkInput.type = 'number';
-    checkInput.value = settings.checkIntervalMinutes || 10;
-    checkInput.style = "width:4rem; font-size:0.9rem;";
-    globalRow.appendChild(defaultLabel);
-    globalRow.appendChild(defaultInput);
-    globalRow.appendChild(paddingLabel);
-    globalRow.appendChild(paddingInput);
-    globalRow.appendChild(checkLabel);
-    globalRow.appendChild(checkInput);
-    var itemsContainer = document.createElement('div');
-    itemsContainer.style = "flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:0.5rem; margin-bottom:0.5rem;";
-    itemsContainer.id = 'TwitchPriorityItems';
-    function renderItems() {
-        itemsContainer.innerHTML = '';
-        list.forEach(function(game, idx) {
-            var row = document.createElement('div');
-            row.style = "display:flex; align-items:center; gap:0.5rem; background:#333; padding:0.25rem 0.5rem; border-radius:4px; color:#fff; font-size:1rem;";
-            var upBtn = buttonAdder("▲", function() {
-                if(idx === 0) return;
-                var tmp = list[idx - 1];
-                list[idx - 1] = list[idx];
-                list[idx] = tmp;
-                renderItems();
-            });
-            var downBtn = buttonAdder("▼", function() {
-                if(idx === list.length - 1) return;
-                var tmp = list[idx + 1];
-                list[idx + 1] = list[idx];
-                list[idx] = tmp;
-                renderItems();
-            });
-            var label = document.createElement('span');
-            label.textContent = game.name;
-            label.style = "flex:1;";
-            var deleteBtn = buttonAdder("✕", function() {
-                list.splice(idx, 1);
-                renderItems();
-            });
-            row.appendChild(upBtn);
-            row.appendChild(downBtn);
-            row.appendChild(label);
-            row.appendChild(deleteBtn);
-            itemsContainer.appendChild(row);
-        });
-    }
-    renderItems();
-    var btnRow = document.createElement('div');
-    btnRow.style = "display:flex; gap:0.5rem;";
-    btnRow.appendChild(buttonAdder("Save", function() {
-        GM_setValue('dropGameList', list);
-        GM_setValue('dropSettings', {
-            defaultMinutes: parseInt(defaultInput.value) || 30,
-            paddingMinutes: parseInt(paddingInput.value) || 2,
-            checkIntervalMinutes: parseInt(checkInput.value) || 10,
-            fallbackChannel: getDropSettings().fallbackChannel || ''
-        });
-        outer.remove();
-    }));
-    btnRow.appendChild(buttonAdder("Close", function() {
-        outer.remove();
-    }));
-    outer.appendChild(globalRow);
-    outer.appendChild(itemsContainer);
-    outer.appendChild(btnRow);
-    document.body.prepend(outer);
-}
 
 function grabSchedule(string) {
     if(document.getElementById("TwitchScheduleOuterWrapper")) {
