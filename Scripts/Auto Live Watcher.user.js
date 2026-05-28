@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.10.3
+// @version      3.10.4
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -59,7 +59,7 @@ GM_addStyle(
 );
 
 // Checks for the website you're currently on and runs the appropriate check
-setTimeout(detectSite, 60000);
+setTimeout(detectSite, 30000);
 
 async function detectSite() {
     if (locationContains("youtube.com") && locationContains("/streams")) {
