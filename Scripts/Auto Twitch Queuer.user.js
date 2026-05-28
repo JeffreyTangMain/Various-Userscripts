@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.7.0
+// @version      1.8.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -26,6 +26,7 @@ var inventoryCheckInterval;
 var currentFarmingGame = null;
 var currentFarmingCampaign = null;
 var inventoryIframe = null;
+var campaignsIframe = null;
 
 var sessionStorageNull = sessionStorage.getItem('scheduleStorage') == null;
 
@@ -62,6 +63,56 @@ function getInventoryIframe() {
     return inventoryIframe;
 }
 
+function getCampaignsIframe() {
+    if (campaignsIframe && campaignsIframe.parentNode) {
+        return campaignsIframe;
+    }
+    campaignsIframe = document.createElement('iframe');
+    campaignsIframe.style.display = 'none';
+    campaignsIframe.src = 'https://www.twitch.tv/drops/campaigns';
+    document.body.appendChild(campaignsIframe);
+    return campaignsIframe;
+}
+
+function checkForHigherPriorityCampaign() {
+    return new Promise(function(resolve) {
+        var farmingIdx = parseInt(sessionStorage.getItem("farmingGameIdx") || "-1");
+        if (farmingIdx <= 0) { resolve(false); return; }
+        var list = getDropList();
+        var higherPriorityGames = list.slice(0, farmingIdx);
+        var higherPriorityNames = higherPriorityGames.map(function(g) { return g.name; });
+        if (higherPriorityNames.length === 0) { resolve(false); return; }
+        var iframe = getCampaignsIframe();
+        function doCheck() {
+            try {
+                var doc = iframe.contentDocument || iframe.contentWindow.document;
+                if (!doc || !doc.body) { resolve(false); return; }
+                var accordionBtns = doc.querySelectorAll('button[aria-expanded]');
+                var tracker = getDropsTracker();
+                var found = Array.from(accordionBtns).some(function(btn) {
+                    var pEl = btn.querySelector('p');
+                    if (!pEl) return false;
+                    var gameName = pEl.textContent.trim();
+                    if (!higherPriorityNames.includes(gameName)) return false;
+                    var trackedCampaigns = tracker[gameName];
+                    var allCompleted = trackedCampaigns && trackedCampaigns.length > 0 && trackedCampaigns.every(function(c) { return c.completed; });
+                    return !allCompleted;
+                });
+                resolve(found);
+            } catch(e) {
+                resolve(false);
+            }
+        }
+        var timeout = setTimeout(function() {
+            resolve(false);
+        }, 20000);
+        iframe.onload = function() {
+            clearTimeout(timeout);
+            setTimeout(doCheck, 3000);
+        };
+        iframe.src = 'https://www.twitch.tv/drops/campaigns';
+    });
+}
 
 function checkInventoryForCampaign(campaignName, endDate) {
     return new Promise(function(resolve) {
@@ -70,13 +121,12 @@ function checkInventoryForCampaign(campaignName, endDate) {
             try {
                 var doc = iframe.contentDocument || iframe.contentWindow.document;
                 if (!doc || !doc.body) {
-                    resolve(true);
+                    resolve({ exists: true, progress: null });
                     return;
                 }
                 var inventoryItems = doc.querySelectorAll('.inventory-campaign-info');
                 if (inventoryItems.length === 0) {
-                    console.log("Inventory items not found in iframe — assuming still active");
-                    resolve(true);
+                    resolve({ exists: true, progress: null });
                     return;
                 }
                 var found = false;
@@ -86,15 +136,22 @@ function checkInventoryForCampaign(campaignName, endDate) {
                         found = true;
                     }
                 });
-                resolve(found);
+                var fills = doc.querySelectorAll('[data-a-target="tw-progress-bar-animation"]');
+                var progressValues = [];
+                fills.forEach(function(fill) {
+                    var bar = fill.parentElement;
+                    var val = bar ? bar.getAttribute('aria-valuenow') : null;
+                    if (val !== null) progressValues.push(val);
+                });
+                var progress = progressValues.length > 0 ? progressValues.join(",") : null;
+                popupText("Current Progress: " + progress);
+                resolve({ exists: found, progress: progress });
             } catch(e) {
-                console.log("Iframe access error:", e.message);
-                resolve(true);
+                resolve({ exists: true, progress: null });
             }
         }
         var timeout = setTimeout(function() {
-            console.log("Inventory iframe load timed out — assuming still active");
-            resolve(true);
+            resolve({ exists: true, progress: null });
         }, 20000);
         iframe.onload = function() {
             clearTimeout(timeout);
@@ -197,60 +254,49 @@ function parseEndDateFromRange(rangeString) {
     return rangeString.trim();
 }
 
-function parseCampaignsFromRow(row) {
+function parseCampaignsFromRow(rowOrRows) {
+    var rowList = Array.isArray(rowOrRows) ? rowOrRows : [rowOrRows];
     var campaigns = [];
-    var nameEls = Array.from(row.querySelectorAll('strong')).filter(function(s) {
-        return !s.closest('.drop-details__label');
-    });
-    var dateEls = Array.from(row.querySelectorAll('p')).filter(function(p) {
-        return p.textContent.includes(' - ') && !p.closest('.drop-details__label');
-    });
-    var count = Math.min(nameEls.length, dateEls.length);
-    for (var i = 0; i < count; i++) {
-        var campaignName = nameEls[i].textContent.trim();
-        var endDateRaw = dateEls[i].textContent.trim();
-        var endDate = parseEndDateFromRange(endDateRaw);
-        if (campaignName && endDate) {
-            campaigns.push({ name: campaignName, endDate: endDate, endDateRaw: endDateRaw });
+    rowList.forEach(function(row) {
+        var nameEls = Array.from(row.querySelectorAll('strong')).filter(function(s) {
+            return !s.closest('.drop-details__label');
+        });
+        var dateEls = Array.from(row.querySelectorAll('p')).filter(function(p) {
+            return p.textContent.includes(' - ') && !p.closest('.drop-details__label');
+        });
+        var count = Math.min(nameEls.length, dateEls.length);
+        for (var i = 0; i < count; i++) {
+            var campaignName = nameEls[i].textContent.trim();
+            var endDateRaw = dateEls[i].textContent.trim();
+            var endDate = parseEndDateFromRange(endDateRaw);
+            if (campaignName && endDate) {
+                campaigns.push({ name: campaignName, endDate: endDate, endDateRaw: endDateRaw });
+            }
         }
-    }
+    });
     return campaigns;
 }
 
 function calculateTimeRemaining(endDateString) {
-    if (!endDateString) {
-        console.log("calculateTimeRemaining: empty date string");
-        return 0;
+    if (!endDateString) return 0;
+    var parts = endDateString.match(/(\w+),\s+(\w+)\s+(\d+),\s+(\d+):(\d+)\s+(AM|PM)/i);
+    if (!parts) {
+        return 1440;
     }
-    var cleanDate = endDateString.replace(/\s+(EDT|EST|PDT|PST|CDT|CST|MDT|MST|GMT|UTC)$/i, '');
-    var endDate = new Date(cleanDate);
+    var months = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+    var month = months[parts[2].substr(0,3)];
+    var day = parseInt(parts[3]);
+    var hour = parseInt(parts[4]);
+    var minute = parseInt(parts[5]);
+    var ampm = parts[6].toUpperCase();
+    if (ampm === 'PM' && hour !== 12) hour += 12;
+    if (ampm === 'AM' && hour === 12) hour = 0;
     var now = new Date();
-    console.log("calculateTimeRemaining - raw: " + endDateString + ", cleaned: " + cleanDate + ", parsed: " + endDate + ", now: " + now);
-    if (isNaN(endDate.getTime())) {
-        console.log("Invalid date parsed, trying alternative parsing");
-        var parts = endDateString.match(/(\w+),\s+(\w+)\s+(\d+),\s+(\d+):(\d+)\s+(AM|PM)/i);
-        if (parts) {
-            var months = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
-            var month = months[parts[2].substr(0,3)];
-            var day = parseInt(parts[3]);
-            var hour = parseInt(parts[4]);
-            var minute = parseInt(parts[5]);
-            var ampm = parts[6].toUpperCase();
-            if (ampm === 'PM' && hour !== 12) hour += 12;
-            if (ampm === 'AM' && hour === 12) hour = 0;
-            var currentYear = new Date().getFullYear();
-            endDate = new Date(currentYear, month, day, hour, minute, 0);
-            if (endDate.getTime() < now.getTime() - (180 * 24 * 60 * 60 * 1000)) {
-                endDate = new Date(currentYear + 1, month, day, hour, minute, 0);
-            }
-        } else {
-            console.log("Could not parse date at all");
-            return 1440;
-        }
+    var endDate = new Date(now.getFullYear(), month, day, hour, minute, 0);
+    if (endDate.getTime() < now.getTime() - (180 * 24 * 60 * 60 * 1000)) {
+        endDate = new Date(now.getFullYear() + 1, month, day, hour, minute, 0);
     }
-    var diffMs = endDate.getTime() - now.getTime();
-    var diffMinutes = Math.floor(diffMs / 60000);
-    console.log("Time remaining in minutes: " + diffMinutes);
+    var diffMinutes = Math.floor((endDate.getTime() - now.getTime()) / 60000);
     return diffMinutes;
 }
 
@@ -343,12 +389,10 @@ function openCampaignManager() {
     var settingsDiv = document.createElement('div');
     settingsDiv.className = 'atq-settings';
 
-    var paddingInput = mkInput('number', settings.paddingMinutes || 2, 'atq-input-num');
     var checkInput = mkInput('number', settings.checkIntervalMinutes || 10, 'atq-input-num');
     var r1 = document.createElement('div');
     r1.className = 'atq-row';
-    r1.appendChild(mkLabel('Padding min')); r1.appendChild(paddingInput);
-    r1.appendChild(mkLabel('Check interval min')); r1.appendChild(checkInput);
+    r1.appendChild(mkLabel('Drop Check Minutes:')); r1.appendChild(checkInput);
 
     var fallbackInput = mkInput('text', settings.fallbackChannel || '', 'atq-input-url');
     fallbackInput.placeholder = 'Fallback channel URL…';
@@ -381,12 +425,11 @@ function openCampaignManager() {
     function saveSettings() {
         GM_setValue('dropGameList', list);
         GM_setValue('dropSettings', {
-            paddingMinutes: parseInt(paddingInput.value) || 2,
             checkIntervalMinutes: parseInt(checkInput.value) || 10,
             fallbackChannel: fallbackInput.value.trim(),
             fallbackMinutes: parseInt(fallbackMinInput.value) || 30
         });
-        popupText('Settings saved.');
+        popupText('Settings saved');
     }
 
     function renderPriority() {
@@ -483,13 +526,13 @@ function openCampaignManager() {
                 var after = Object.values(getDropsTracker()).reduce(function(s, a) { return s + a.length; }, 0);
                 var n = before - after;
                 renderTracker();
-                popupText(n > 0 ? 'Deleted ' + n + ' expired campaign' + (n !== 1 ? 's' : '') + '.' : 'No expired campaigns to delete.');
+                popupText(n > 0 ? 'Deleted ' + n + ' expired campaign' + (n !== 1 ? 's' : '') + '.' : 'No expired campaigns to delete');
             }, 'atq-btn atq-btn-sm'));
             footer.appendChild(mkBtn('Delete All', function() {
                 if (confirm('Delete all tracked campaigns?')) {
                     deleteAllFromTracker();
                     renderTracker();
-                    popupText('All campaigns deleted.');
+                    popupText('All campaigns deleted');
                 }
             }, 'atq-btn atq-btn-sm atq-btn-danger'));
         }
@@ -519,7 +562,6 @@ function injectDropButtons() {
         observer.disconnect();
         renderDropButtons(campaignContainer);
         if(sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") == "true" && window.location.pathname === "/drops/campaigns") {
-            console.log("Autostarting Farm");
             autoFarmCampaigns();
         }
     });
@@ -564,7 +606,7 @@ function getDropList() {
 }
 
 function getDropSettings() {
-    return GM_getValue('dropSettings', { paddingMinutes: 2, checkIntervalMinutes: 10, fallbackChannel: '', fallbackMinutes: 30 });
+    return GM_getValue('dropSettings', { checkIntervalMinutes: 10, fallbackChannel: '', fallbackMinutes: 30 });
 }
 
 function toggleDropGame(gameName) {
@@ -593,6 +635,7 @@ function autoFarmCampaignsToggle() {
 
 function autoFarmCampaigns() {
     if(window.location.pathname !== "/drops/campaigns") {
+        popupText("Returning to Campaigns page to farm");
         window.location.assign("https://www.twitch.tv/drops/campaigns");
         return;
     }
@@ -602,11 +645,25 @@ function autoFarmCampaigns() {
         if (fallback) {
             queueFallbackChannel(fallback);
         } else {
-            popupText("No campaigns in priority list.");
+            popupText("No campaigns in priority list");
         }
         return;
     }
-    farmNextPriority(list, 0);
+    var stallSameGame = sessionStorage.getItem("farmingStallSameGame");
+    var stallNextIdx = sessionStorage.getItem("farmingStallNextIdx");
+    if (stallSameGame !== null) {
+        sessionStorage.removeItem("farmingStallSameGame");
+        farmNextPriority(list, parseInt(stallSameGame));
+    } else if (stallNextIdx !== null) {
+        sessionStorage.removeItem("farmingStallNextIdx");
+        sessionStorage.removeItem("farmingSkipCampaigns");
+        sessionStorage.setItem("farmingIsStallFallback", "true");
+        farmNextPriority(list, parseInt(stallNextIdx));
+    } else {
+        sessionStorage.removeItem("farmingIsStallFallback");
+        sessionStorage.removeItem("farmingSkipCampaigns");
+        farmNextPriority(list, 0);
+    }
 }
 
 function farmNextPriority(list, idx) {
@@ -618,7 +675,7 @@ function farmNextPriority(list, idx) {
         if (fallback) {
             queueFallbackChannel(fallback);
         } else {
-            popupText("All priority games completed.");
+            popupText("All priority games completed");
         }
         return;
     }
@@ -626,115 +683,164 @@ function farmNextPriority(list, idx) {
     currentFarmingGame = game.name;
     var header = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Drop Campaigns");
     if(!header) {
-        popupText("Could not find campaigns list.");
+        popupText("Could not find campaigns list");
         return;
     }
     var campaignContainer = findCampaignContainer(header);
     if(!campaignContainer) {
-        popupText("Could not find campaigns list.");
+        popupText("Could not find campaigns list");
         return;
     }
     var rows = Array.from(campaignContainer.children);
-    var targetRow = rows.find(function(row) {
+    var matchingRows = rows.filter(function(row) {
         var nameEl = row.querySelector('p');
         return nameEl && nameEl.textContent.trim() === game.name;
     });
-    if(!targetRow) {
+    if(matchingRows.length === 0) {
         popupText("Campaign not found on page: " + game.name);
         farmNextPriority(list, idx + 1);
         return;
     }
-    var accordionBtn = targetRow.querySelector('button');
-    var isExpanded = accordionBtn && accordionBtn.getAttribute('aria-expanded') === 'true';
-    if(!isExpanded && accordionBtn) {
-        accordionBtn.click();
-    }
-    var detailObserver = new MutationObserver(function() {
-        var detailLabel = targetRow.querySelector('.drop-details__label');
-        if(!detailLabel) return;
-        detailObserver.disconnect();
-        parseAllCampaignsAndQueue(game, targetRow, list, idx);
+    var toLoad = matchingRows.filter(function(r) {
+        return !r.querySelector('.drop-details__label');
     });
-    detailObserver.observe(targetRow, { childList: true, subtree: true });
-    if(isExpanded) {
-        var detailLabel = targetRow.querySelector('.drop-details__label');
-        if(detailLabel) {
-            detailObserver.disconnect();
-            parseAllCampaignsAndQueue(game, targetRow, list, idx);
-        }
+    if(toLoad.length === 0) {
+        parseAllCampaignsAndQueue(game, matchingRows, list, idx);
+        return;
     }
+    var loadedCount = 0;
+    toLoad.forEach(function(r) {
+        var parseTimer = null;
+        var accordionBtn = r.querySelector('button');
+        var isExpanded = accordionBtn && accordionBtn.getAttribute('aria-expanded') === 'true';
+        var detailObserver = new MutationObserver(function() {
+            if(!r.querySelector('.drop-details__label')) return;
+            clearTimeout(parseTimer);
+            parseTimer = setTimeout(function() {
+                detailObserver.disconnect();
+                loadedCount++;
+                if(loadedCount >= toLoad.length) {
+                    parseAllCampaignsAndQueue(game, matchingRows, list, idx);
+                }
+            }, 500);
+        });
+        detailObserver.observe(r, { childList: true, subtree: true });
+        if(!isExpanded && accordionBtn) {
+            accordionBtn.click();
+        }
+    });
 }
 
-function parseAllCampaignsAndQueue(game, row, list, idx) {
-    var campaigns = parseCampaignsFromRow(row);
-    console.log("Parsed " + campaigns.length + " campaigns for " + game.name);
-    campaigns.forEach(function(c) {
-        console.log("  Campaign: " + c.name + ", endDate: " + c.endDate);
-    });
+function parseAllCampaignsAndQueue(game, matchingRows, list, idx) {
+    var campaigns = parseCampaignsFromRow(matchingRows);
     if (campaigns.length === 0) {
-        popupText("No campaigns found for: " + game.name + ", skipping.");
+        popupText("No campaigns found for: " + game.name + ", skipping");
         farmNextPriority(list, idx + 1);
         return;
     }
     campaigns.forEach(function(campaign) {
         addCampaignToTracker(game.name, campaign.name, campaign.endDate);
     });
-    var uncompleted = getUncompletedCampaigns(game.name);
-    console.log("Uncompleted campaigns: " + uncompleted.length);
+    var tracker = getDropsTracker();
+    var uncompleted = campaigns.filter(function(c) {
+        var tracked = tracker[game.name] && tracker[game.name].find(function(t) { return t.name === c.name; });
+        return !tracked || !tracked.completed;
+    });
     if (uncompleted.length === 0) {
-        popupText("All campaigns completed for: " + game.name + ", moving to next.");
+        popupText("All campaigns completed for: " + game.name + ", moving to next");
+        sessionStorage.removeItem("farmingSkipCampaigns");
         farmNextPriority(list, idx + 1);
         return;
     }
-    findNextFarmableCampaign(game, row, list, idx, uncompleted);
+    var skipList = JSON.parse(sessionStorage.getItem("farmingSkipCampaigns") || "[]");
+    var farmable = uncompleted.filter(function(c) { return !skipList.includes(c.name); });
+    if (farmable.length === 0) {
+        sessionStorage.removeItem("farmingSkipCampaigns");
+        sessionStorage.setItem("farmingStallNextIdx", String(idx + 1));
+        sessionStorage.setItem("farmingIsStallFallback", "true");
+        popupText("All campaign links stalled for " + game.name + ". Trying lower priority game");
+        window.location.assign("https://www.twitch.tv/drops/campaigns");
+        return;
+    }
+    findNextFarmableCampaign(game, matchingRows, list, idx, farmable);
 }
 
-function findNextFarmableCampaign(game, row, list, idx, uncompleted) {
+function parseEndDateToMs(endDateString) {
+    if (!endDateString) return Infinity;
+    var parts = endDateString.match(/(\w+),\s+(\w+)\s+(\d+),\s+(\d+):(\d+)\s+(AM|PM)/i);
+    if (!parts) return Infinity;
+    var months = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+    var month = months[parts[2].substr(0,3)];
+    var day = parseInt(parts[3]);
+    var hour = parseInt(parts[4]);
+    var minute = parseInt(parts[5]);
+    var ampm = parts[6].toUpperCase();
+    if (ampm === 'PM' && hour !== 12) hour += 12;
+    if (ampm === 'AM' && hour === 12) hour = 0;
+    var now = Date.now();
+    var currentYear = new Date().getFullYear();
+    var d = new Date(currentYear, month, day, hour, minute, 0);
+    if (d.getTime() < now - (180 * 24 * 60 * 60 * 1000)) {
+        d = new Date(currentYear + 1, month, day, hour, minute, 0);
+    }
+    return d.getTime();
+}
+
+function findNextFarmableCampaign(game, matchingRows, list, idx, uncompleted) {
     var farmableCampaign = null;
-    console.log("Finding next farmable campaign for " + game.name + ", uncompleted: " + uncompleted.length);
+    uncompleted = uncompleted.slice().sort(function(a, b) {
+        var diff = parseEndDateToMs(a.endDate) - parseEndDateToMs(b.endDate);
+        return diff !== 0 ? diff : 0;
+    });
     for (var i = 0; i < uncompleted.length; i++) {
         var campaign = uncompleted[i];
         var remainingMinutes = calculateTimeRemaining(campaign.endDate);
-        console.log("Campaign: " + campaign.name + ", endDate: " + campaign.endDate + ", remaining: " + remainingMinutes);
         if (remainingMinutes > 0) {
             farmableCampaign = campaign;
             break;
         } else {
-            console.log("Campaign appears expired, but double-checking...");
             if (remainingMinutes < -60) {
                 markCampaignCompleted(game.name, campaign.name, true);
-                console.log("Campaign expired: " + campaign.name);
             } else {
                 farmableCampaign = campaign;
-                console.log("Time remaining unclear, attempting to farm: " + campaign.name);
                 break;
             }
         }
     }
     if (!farmableCampaign) {
         if (areAllCampaignsCompleted(game.name)) {
-            popupText("All campaigns completed for: " + game.name + ", moving to next.");
+            popupText("All campaigns completed for: " + game.name + ", moving to next");
             farmNextPriority(list, idx + 1);
             return;
         }
         var stillUncompleted = getUncompletedCampaigns(game.name);
         if (stillUncompleted.length > 0) {
-            findNextFarmableCampaign(game, row, list, idx, stillUncompleted);
+            findNextFarmableCampaign(game, matchingRows, list, idx, stillUncompleted);
         }
         return;
     }
     currentFarmingCampaign = farmableCampaign;
-    queueCampaignStream(game, row, farmableCampaign, list, idx);
+    queueCampaignStream(game, matchingRows, farmableCampaign, list, idx);
 }
 
-function queueCampaignStream(game, row, campaign, list, idx) {
-    var matchingStrong = Array.from(row.querySelectorAll('strong')).find(function(s) {
-        return !s.closest('.drop-details__label') && s.textContent.trim() === campaign.name;
-    });
+function queueCampaignStream(game, matchingRows, campaign, list, idx) {
+    var rows = Array.isArray(matchingRows) ? matchingRows : [matchingRows];
+    var matchingStrong = null;
+    var campaignRow = null;
+    for (var r = 0; r < rows.length; r++) {
+        var s = Array.from(rows[r].querySelectorAll('strong')).find(function(el) {
+            return !el.closest('.drop-details__label') && el.textContent.trim() === campaign.name;
+        });
+        if (s) {
+            matchingStrong = s;
+            campaignRow = rows[r];
+            break;
+        }
+    }
     var targetBlock = null;
     if (matchingStrong) {
         var el = matchingStrong.parentElement;
-        while (el && el !== row) {
+        while (el && el !== campaignRow) {
             var hasEarnLabel = Array.from(el.querySelectorAll('.drop-details__label'))
                 .some(function(lbl) { return lbl.textContent.includes('How to Earn'); });
             if (hasEarnLabel) { targetBlock = el; break; }
@@ -746,7 +852,7 @@ function queueCampaignStream(game, row, campaign, list, idx) {
         return;
     }
     var earnLabel = Array.from(targetBlock.querySelectorAll('.drop-details__label'))
-    .find(el => el.textContent.includes("How to Earn the Drop"));
+        .find(el => el.textContent.includes("How to Earn the Drop"));
     if(!earnLabel) {
         popupText("Could not read drop details for: " + campaign.name);
         return;
@@ -759,11 +865,11 @@ function queueCampaignStream(game, row, campaign, list, idx) {
     var items = Array.from(ul.querySelectorAll('li'));
     var watchItems = items.filter(li => /watch for/i.test(li.textContent));
     if(watchItems.length === 0) {
-        popupText("No watchable drops for: " + campaign.name + ", marking complete.");
+        popupText("No watchable drops for: " + campaign.name + ", marking complete");
         markCampaignCompleted(game.name, campaign.name, true);
         var uncompleted = getUncompletedCampaigns(game.name);
         if (uncompleted.length > 0) {
-            findNextFarmableCampaign(game, row, list, idx, uncompleted);
+            findNextFarmableCampaign(game, matchingRows, list, idx, uncompleted);
         } else if (areAllCampaignsCompleted(game.name)) {
             farmNextPriority(list, idx + 1);
         }
@@ -776,11 +882,14 @@ function queueCampaignStream(game, row, campaign, list, idx) {
         popupText("No stream link found for: " + campaign.name);
         return;
     }
+    sessionStorage.setItem("farmingAllLinks", JSON.stringify(links.map(function(l) { return l.getAttribute('href'); })));
+    sessionStorage.setItem("farmingLinkIndex", String(links.length - 1));
+    sessionStorage.removeItem("farmingLastProgress");
     var streamUrl = streamHref.startsWith('http') ? streamHref : "https://www.twitch.tv" + streamHref;
     var settings = getDropSettings();
-    var padding = settings.paddingMinutes;
     var remainingMinutes = calculateTimeRemaining(campaign.endDate);
-    var watchMinutes = remainingMinutes + padding;
+    var isStallFallback = sessionStorage.getItem("farmingIsStallFallback") === "true";
+    var watchMinutes = isStallFallback ? (settings.fallbackMinutes || 30) : remainingMinutes;
     if(streamUrl.includes("twitch.tv/directory/category") && !streamUrl.includes("?filter=drops&sort=VIEWER_COUNT")) {
         streamUrl = streamUrl.split("?")[0] + "?filter=drops&sort=VIEWER_COUNT";
     } else if(!streamUrl.includes("/directory/category") && !streamUrl.includes("/about") && !streamUrl.includes("?filter=drops&sort=VIEWER_COUNT")) {
@@ -801,7 +910,7 @@ function queueCampaignStream(game, row, campaign, list, idx) {
 
 function queueFallbackChannel(channelUrl) {
     var settings = getDropSettings();
-    var watchMinutes = (settings.fallbackMinutes || 30) + (settings.paddingMinutes || 2);
+    var watchMinutes = settings.fallbackMinutes || 30;
     if(channelUrl.includes("twitch.tv/directory/category") && !channelUrl.includes("?filter=drops&sort=VIEWER_COUNT")) {
         channelUrl = channelUrl.split("?")[0] + "?filter=drops&sort=VIEWER_COUNT";
     } else if(!channelUrl.includes("/directory/category") && !channelUrl.includes("/about") && !channelUrl.includes("?filter=drops&sort=VIEWER_COUNT")) {
@@ -816,8 +925,57 @@ function queueFallbackChannel(channelUrl) {
     sessionStorage.removeItem("farmingGameName");
     sessionStorage.removeItem("farmingCampaignName");
     sessionStorage.removeItem("farmingGameIdx");
+    sessionStorage.removeItem("farmingAllLinks");
+    sessionStorage.removeItem("farmingLinkIndex");
+    sessionStorage.removeItem("farmingLastProgress");
+    sessionStorage.removeItem("farmingIsStallFallback");
+    sessionStorage.removeItem("farmingStallNextIdx");
+    sessionStorage.removeItem("farmingSkipCampaigns");
+    sessionStorage.removeItem("farmingStallSameGame");
     popupText("No drops available. Going to fallback for " + watchMinutes + " min");
     processSchedule();
+}
+
+
+function tryNextAvailableLink(gameName, campaignName) {
+    var allLinks = JSON.parse(sessionStorage.getItem("farmingAllLinks") || "[]");
+    var linkIndex = parseInt(sessionStorage.getItem("farmingLinkIndex") || "-1");
+    var nextIndex = linkIndex - 1;
+    while (nextIndex >= 0 && allLinks[nextIndex] && allLinks[nextIndex].includes("/directory/category")) {
+        nextIndex--;
+    }
+    if (nextIndex >= 0 && allLinks[nextIndex]) {
+        var nextHref = allLinks[nextIndex];
+        var nextUrl = nextHref.startsWith('http') ? nextHref : "https://www.twitch.tv" + nextHref;
+        if (!nextUrl.includes("/directory/category") && !nextUrl.includes("/about")) {
+            nextUrl += "/about";
+        }
+        sessionStorage.setItem("farmingLinkIndex", String(nextIndex));
+        sessionStorage.removeItem("farmingLastProgress");
+        var tracker = getDropsTracker();
+        var campaign = tracker[gameName] && tracker[gameName].find(function(c) { return c.name === campaignName; });
+        var settings = getDropSettings();
+        var remainingMinutes = campaign ? calculateTimeRemaining(campaign.endDate) : (settings.fallbackMinutes || 30);
+        var now = new Date();
+        var returnTime = new Date(now.getTime() + remainingMinutes * 60 * 1000);
+        var nowString = now.toLocaleDateString("en-CA") + " " + now.toLocaleTimeString("en");
+        var returnString = returnTime.toLocaleDateString("en-CA") + " " + returnTime.toLocaleTimeString("en");
+        scheduleList = [nextUrl, nowString, "https://www.twitch.tv/drops/campaigns", returnString];
+        sessionStorage.setItem("scheduleStorage", scheduleString());
+        popupText("Stream stalled. Trying backup link: " + nextHref);
+        processSchedule();
+    } else {
+        var gameIdx = parseInt(sessionStorage.getItem("farmingGameIdx") || "0");
+        var skipped = JSON.parse(sessionStorage.getItem("farmingSkipCampaigns") || "[]");
+        if (!skipped.includes(campaignName)) skipped.push(campaignName);
+        sessionStorage.setItem("farmingSkipCampaigns", JSON.stringify(skipped));
+        sessionStorage.setItem("farmingStallSameGame", String(gameIdx));
+        sessionStorage.removeItem("farmingLastProgress");
+        sessionStorage.removeItem("farmingAllLinks");
+        sessionStorage.removeItem("farmingLinkIndex");
+        popupText("All links stalled for " + campaignName + ". Trying next campaign");
+        window.location.assign("https://www.twitch.tv/drops/campaigns");
+    }
 }
 
 function startInventoryChecking() {
@@ -829,21 +987,41 @@ function startInventoryChecking() {
     if (!gameName || !campaignName) return;
     popupText("Starting inventory checks every " + (settings.checkIntervalMinutes || 10) + " min");
     getInventoryIframe();
+    getCampaignsIframe();
     inventoryCheckInterval = setInterval(function() {
         var campaign = getDropsTracker()[gameName]?.find(c => c.name === campaignName);
         if (!campaign) {
             clearInterval(inventoryCheckInterval);
             return;
         }
-        checkInventoryForCampaign(campaignName, campaign.endDate).then(function(exists) {
-            if (!exists) {
-                console.log("Campaign no longer in inventory: " + campaignName);
+        checkInventoryForCampaign(campaignName, campaign.endDate).then(function(result) {
+            if (!result.exists) {
                 markCampaignCompleted(gameName, campaignName, true);
                 clearInterval(inventoryCheckInterval);
-                popupText("Campaign completed: " + campaignName + ". Returning to campaigns.");
+                popupText("Campaign completed: " + campaignName + ". Returning to campaigns");
                 window.location.assign("https://www.twitch.tv/drops/campaigns");
             } else {
-                console.log("Campaign still active: " + campaignName);
+                checkForHigherPriorityCampaign().then(function(higherFound) {
+                    if (higherFound && sessionStorage.getItem("farmingIsStallFallback") !== "true") {
+                        clearInterval(inventoryCheckInterval);
+                        popupText("Higher priority campaign available. Returning to campaigns");
+                        window.location.assign("https://www.twitch.tv/drops/campaigns");
+                    } else {
+                        var currentProgress = result.progress;
+                        var lastProgress = sessionStorage.getItem("farmingLastProgress");
+                        if (currentProgress !== null) {
+                            sessionStorage.setItem("farmingLastProgress", currentProgress);
+                            if (lastProgress !== null && currentProgress === lastProgress) {
+                                var storedLinks = JSON.parse(sessionStorage.getItem("farmingAllLinks") || "[]");
+                                var isCategory = storedLinks.length > 0 && storedLinks[storedLinks.length - 1].includes("/directory/category");
+                                if (!isCategory) {
+                                    clearInterval(inventoryCheckInterval);
+                                    tryNextAvailableLink(gameName, campaignName);
+                                }
+                            }
+                        }
+                    }
+                });
             }
         });
     }, checkIntervalMs);
@@ -1030,6 +1208,7 @@ function gotoNextWebsite() {
     var nextWebsite = scheduleList[0];
     scheduleList.splice(0,2);
     sessionStorage.setItem("scheduleStorage",scheduleString());
+    popupText("Moving to next website: " + nextWebsite);
     window.location.assign(nextWebsite);
 }
 
@@ -1041,6 +1220,13 @@ function cancelQueue() {
     sessionStorage.removeItem("farmingGameName");
     sessionStorage.removeItem("farmingCampaignName");
     sessionStorage.removeItem("farmingGameIdx");
+    sessionStorage.removeItem("farmingAllLinks");
+    sessionStorage.removeItem("farmingLinkIndex");
+    sessionStorage.removeItem("farmingLastProgress");
+    sessionStorage.removeItem("farmingIsStallFallback");
+    sessionStorage.removeItem("farmingStallNextIdx");
+    sessionStorage.removeItem("farmingSkipCampaigns");
+    sessionStorage.removeItem("farmingStallSameGame");
     scheduleList = [];
     currentFarmingGame = null;
     currentFarmingCampaign = null;
@@ -1085,7 +1271,7 @@ function popupText(string) {
     box.textContent = string;
     box.style.cssText = "position:fixed; top:16px; left:16px; z-index:999991; max-width:300px; padding:10px 14px; background-color:#333; color:#fff; border-radius:6px; font-size:13px; line-height:1.5; word-wrap:break-word; white-space:normal; cursor:pointer; transform:translateX(calc(-100% - 16px)); transition:transform 0.35s ease; box-sizing:border-box;";
     document.body.appendChild(box);
-    console.log(string);
+    console.log("[ATQLogs] " + string);
     requestAnimationFrame(function () {
         requestAnimationFrame(function () {
             box.style.transform = "translateX(0)";
