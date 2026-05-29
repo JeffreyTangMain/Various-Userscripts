@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.9.0
+// @version      1.9.1
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -663,6 +663,7 @@ function autoFarmCampaignsToggle() {
 
 function autoFarmCampaigns() {
     stopInventoryChecking();
+    sessionStorage.removeItem("inventoryCheckElapsedMinutes");
     if(window.location.pathname !== "/drops/campaigns") {
         popupText("Returning to Campaigns page to farm");
         window.location.assign("https://www.twitch.tv/drops/campaigns");
@@ -972,7 +973,6 @@ function tryNextAvailableLink(gameName, campaignName) {
 function stopInventoryChecking() {
     clearTimeout(inventoryCheckInterval);
     inventoryCheckInterval = null;
-    sessionStorage.removeItem("inventoryCheckElapsedMinutes");
 }
 
 function startInventoryChecking() {
