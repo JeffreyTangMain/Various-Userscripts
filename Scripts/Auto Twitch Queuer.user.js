@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.8.0
+// @version      1.9.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -52,25 +52,23 @@ if (sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") == "true" &&
     }, 3000);
 }
 
+function createHiddenIframe(src) {
+    var f = document.createElement('iframe');
+    f.style.display = 'none';
+    f.src = src;
+    document.body.appendChild(f);
+    return f;
+}
+
 function getInventoryIframe() {
-    if (inventoryIframe && inventoryIframe.parentNode) {
-        return inventoryIframe;
-    }
-    inventoryIframe = document.createElement('iframe');
-    inventoryIframe.style.display = 'none';
-    inventoryIframe.src = 'https://www.twitch.tv/drops/inventory';
-    document.body.appendChild(inventoryIframe);
+    if (inventoryIframe && inventoryIframe.parentNode) return inventoryIframe;
+    inventoryIframe = createHiddenIframe('https://www.twitch.tv/drops/inventory');
     return inventoryIframe;
 }
 
 function getCampaignsIframe() {
-    if (campaignsIframe && campaignsIframe.parentNode) {
-        return campaignsIframe;
-    }
-    campaignsIframe = document.createElement('iframe');
-    campaignsIframe.style.display = 'none';
-    campaignsIframe.src = 'https://www.twitch.tv/drops/campaigns';
-    document.body.appendChild(campaignsIframe);
+    if (campaignsIframe && campaignsIframe.parentNode) return campaignsIframe;
+    campaignsIframe = createHiddenIframe('https://www.twitch.tv/drops/campaigns');
     return campaignsIframe;
 }
 
@@ -83,10 +81,14 @@ function checkForHigherPriorityCampaign() {
         var higherPriorityNames = higherPriorityGames.map(function(g) { return g.name; });
         if (higherPriorityNames.length === 0) { resolve(false); return; }
         var iframe = getCampaignsIframe();
+        function cleanup() {
+            if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+            campaignsIframe = null;
+        }
         function doCheck() {
             try {
                 var doc = iframe.contentDocument || iframe.contentWindow.document;
-                if (!doc || !doc.body) { resolve(false); return; }
+                if (!doc || !doc.body) { cleanup(); resolve(false); return; }
                 var accordionBtns = doc.querySelectorAll('button[aria-expanded]');
                 var tracker = getDropsTracker();
                 var found = Array.from(accordionBtns).some(function(btn) {
@@ -98,12 +100,15 @@ function checkForHigherPriorityCampaign() {
                     var allCompleted = trackedCampaigns && trackedCampaigns.length > 0 && trackedCampaigns.every(function(c) { return c.completed; });
                     return !allCompleted;
                 });
+                cleanup();
                 resolve(found);
             } catch(e) {
+                cleanup();
                 resolve(false);
             }
         }
         var timeout = setTimeout(function() {
+            cleanup();
             resolve(false);
         }, 20000);
         iframe.onload = function() {
@@ -117,15 +122,21 @@ function checkForHigherPriorityCampaign() {
 function checkInventoryForCampaign(campaignName, endDate) {
     return new Promise(function(resolve) {
         var iframe = getInventoryIframe();
+        function cleanup() {
+            if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+            inventoryIframe = null;
+        }
         function doCheck() {
             try {
                 var doc = iframe.contentDocument || iframe.contentWindow.document;
                 if (!doc || !doc.body) {
+                    cleanup();
                     resolve({ exists: true, progress: null });
                     return;
                 }
                 var inventoryItems = doc.querySelectorAll('.inventory-campaign-info');
                 if (inventoryItems.length === 0) {
+                    cleanup();
                     resolve({ exists: true, progress: null });
                     return;
                 }
@@ -145,12 +156,15 @@ function checkInventoryForCampaign(campaignName, endDate) {
                 });
                 var progress = progressValues.length > 0 ? progressValues.join(",") : null;
                 popupText("Current Progress: " + progress);
+                cleanup();
                 resolve({ exists: found, progress: progress });
             } catch(e) {
+                cleanup();
                 resolve({ exists: true, progress: null });
             }
         }
         var timeout = setTimeout(function() {
+            cleanup();
             resolve({ exists: true, progress: null });
         }, 20000);
         iframe.onload = function() {
@@ -277,12 +291,10 @@ function parseCampaignsFromRow(rowOrRows) {
     return campaigns;
 }
 
-function calculateTimeRemaining(endDateString) {
-    if (!endDateString) return 0;
+function parseEndDateToMs(endDateString) {
+    if (!endDateString) return Infinity;
     var parts = endDateString.match(/(\w+),\s+(\w+)\s+(\d+),\s+(\d+):(\d+)\s+(AM|PM)/i);
-    if (!parts) {
-        return 1440;
-    }
+    if (!parts) return Infinity;
     var months = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
     var month = months[parts[2].substr(0,3)];
     var day = parseInt(parts[3]);
@@ -291,13 +303,20 @@ function calculateTimeRemaining(endDateString) {
     var ampm = parts[6].toUpperCase();
     if (ampm === 'PM' && hour !== 12) hour += 12;
     if (ampm === 'AM' && hour === 12) hour = 0;
-    var now = new Date();
-    var endDate = new Date(now.getFullYear(), month, day, hour, minute, 0);
-    if (endDate.getTime() < now.getTime() - (180 * 24 * 60 * 60 * 1000)) {
-        endDate = new Date(now.getFullYear() + 1, month, day, hour, minute, 0);
+    var now = Date.now();
+    var currentYear = new Date().getFullYear();
+    var d = new Date(currentYear, month, day, hour, minute, 0);
+    if (d.getTime() < now - (180 * 24 * 60 * 60 * 1000)) {
+        d = new Date(currentYear + 1, month, day, hour, minute, 0);
     }
-    var diffMinutes = Math.floor((endDate.getTime() - now.getTime()) / 60000);
-    return diffMinutes;
+    return d.getTime();
+}
+
+function calculateTimeRemaining(endDateString) {
+    if (!endDateString) return 0;
+    var ms = parseEndDateToMs(endDateString);
+    if (ms === Infinity) return 1440;
+    return Math.floor((ms - Date.now()) / 60000);
 }
 
 function openCampaignManager() {
@@ -395,7 +414,7 @@ function openCampaignManager() {
     r1.appendChild(mkLabel('Drop Check Minutes:')); r1.appendChild(checkInput);
 
     var fallbackInput = mkInput('text', settings.fallbackChannel || '', 'atq-input-url');
-    fallbackInput.placeholder = 'Fallback channel URL…';
+    fallbackInput.placeholder = 'Fallback channel URL';
     var fallbackMinInput = mkInput('number', settings.fallbackMinutes || 30, 'atq-input-num');
     var r2 = document.createElement('div');
     r2.className = 'atq-row';
@@ -620,6 +639,15 @@ function toggleDropGame(gameName) {
     GM_setValue('dropGameList', list);
 }
 
+function useFallbackOr(message) {
+    var fallback = getDropSettings().fallbackChannel;
+    if (fallback) {
+        queueFallbackChannel(fallback);
+    } else {
+        popupText(message);
+    }
+}
+
 function autoFarmCampaignsToggle() {
     if(sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") != "true") {
         sessionStorage.setItem("AutoTwitchQueuerAutoFarmCampaigns","true");
@@ -627,13 +655,14 @@ function autoFarmCampaignsToggle() {
     } else {
         popupText("Disabling Auto Farm Campaigns");
         sessionStorage.setItem("AutoTwitchQueuerAutoFarmCampaigns","false");
-        clearInterval(inventoryCheckInterval);
+        stopInventoryChecking();
         cancelQueue();
         window.location.assign("https://www.twitch.tv/drops/campaigns");
     }
 }
 
 function autoFarmCampaigns() {
+    stopInventoryChecking();
     if(window.location.pathname !== "/drops/campaigns") {
         popupText("Returning to Campaigns page to farm");
         window.location.assign("https://www.twitch.tv/drops/campaigns");
@@ -641,12 +670,7 @@ function autoFarmCampaigns() {
     }
     var list = getDropList();
     if(list.length === 0) {
-        var fallback = getDropSettings().fallbackChannel;
-        if (fallback) {
-            queueFallbackChannel(fallback);
-        } else {
-            popupText("No campaigns in priority list");
-        }
+        useFallbackOr("No campaigns in priority list");
         return;
     }
     var stallSameGame = sessionStorage.getItem("farmingStallSameGame");
@@ -670,13 +694,8 @@ function farmNextPriority(list, idx) {
     if(idx >= list.length) {
         currentFarmingGame = null;
         currentFarmingCampaign = null;
-        clearInterval(inventoryCheckInterval);
-        var fallback = getDropSettings().fallbackChannel;
-        if (fallback) {
-            queueFallbackChannel(fallback);
-        } else {
-            popupText("All priority games completed");
-        }
+        stopInventoryChecking();
+        useFallbackOr("All priority games completed");
         return;
     }
     var game = list[idx];
@@ -765,32 +784,10 @@ function parseAllCampaignsAndQueue(game, matchingRows, list, idx) {
     findNextFarmableCampaign(game, matchingRows, list, idx, farmable);
 }
 
-function parseEndDateToMs(endDateString) {
-    if (!endDateString) return Infinity;
-    var parts = endDateString.match(/(\w+),\s+(\w+)\s+(\d+),\s+(\d+):(\d+)\s+(AM|PM)/i);
-    if (!parts) return Infinity;
-    var months = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
-    var month = months[parts[2].substr(0,3)];
-    var day = parseInt(parts[3]);
-    var hour = parseInt(parts[4]);
-    var minute = parseInt(parts[5]);
-    var ampm = parts[6].toUpperCase();
-    if (ampm === 'PM' && hour !== 12) hour += 12;
-    if (ampm === 'AM' && hour === 12) hour = 0;
-    var now = Date.now();
-    var currentYear = new Date().getFullYear();
-    var d = new Date(currentYear, month, day, hour, minute, 0);
-    if (d.getTime() < now - (180 * 24 * 60 * 60 * 1000)) {
-        d = new Date(currentYear + 1, month, day, hour, minute, 0);
-    }
-    return d.getTime();
-}
-
 function findNextFarmableCampaign(game, matchingRows, list, idx, uncompleted) {
     var farmableCampaign = null;
     uncompleted = uncompleted.slice().sort(function(a, b) {
-        var diff = parseEndDateToMs(a.endDate) - parseEndDateToMs(b.endDate);
-        return diff !== 0 ? diff : 0;
+        return parseEndDateToMs(a.endDate) - parseEndDateToMs(b.endDate);
     });
     for (var i = 0; i < uncompleted.length; i++) {
         var campaign = uncompleted[i];
@@ -821,6 +818,25 @@ function findNextFarmableCampaign(game, matchingRows, list, idx, uncompleted) {
     }
     currentFarmingCampaign = farmableCampaign;
     queueCampaignStream(game, matchingRows, farmableCampaign, list, idx);
+}
+
+function normalizeTwitchUrl(url) {
+    if (url.includes("twitch.tv/directory/category") && !url.includes("?filter=drops&sort=VIEWER_COUNT")) {
+        return url.split("?")[0] + "?filter=drops&sort=VIEWER_COUNT";
+    }
+    if (!url.includes("/directory/category") && !url.includes("/about") && !url.includes("?filter=drops&sort=VIEWER_COUNT")) {
+        return url + "/about";
+    }
+    return url;
+}
+
+function queueStreamFor(url, watchMinutes) {
+    var now = new Date();
+    var returnTime = new Date(now.getTime() + watchMinutes * 60 * 1000);
+    var nowString = now.toLocaleDateString("en-CA") + " " + now.toLocaleTimeString("en");
+    var returnString = returnTime.toLocaleDateString("en-CA") + " " + returnTime.toLocaleTimeString("en");
+    scheduleList = [url, nowString, "https://www.twitch.tv/drops/campaigns", returnString];
+    sessionStorage.setItem("scheduleStorage", scheduleString());
 }
 
 function queueCampaignStream(game, matchingRows, campaign, list, idx) {
@@ -890,17 +906,7 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
     var remainingMinutes = calculateTimeRemaining(campaign.endDate);
     var isStallFallback = sessionStorage.getItem("farmingIsStallFallback") === "true";
     var watchMinutes = isStallFallback ? (settings.fallbackMinutes || 30) : remainingMinutes;
-    if(streamUrl.includes("twitch.tv/directory/category") && !streamUrl.includes("?filter=drops&sort=VIEWER_COUNT")) {
-        streamUrl = streamUrl.split("?")[0] + "?filter=drops&sort=VIEWER_COUNT";
-    } else if(!streamUrl.includes("/directory/category") && !streamUrl.includes("/about") && !streamUrl.includes("?filter=drops&sort=VIEWER_COUNT")) {
-        streamUrl += "/about";
-    }
-    var now = new Date();
-    var returnTime = new Date(now.getTime() + watchMinutes * 60 * 1000);
-    var nowString = now.toLocaleDateString("en-CA") + " " + now.toLocaleTimeString("en");
-    var returnString = returnTime.toLocaleDateString("en-CA") + " " + returnTime.toLocaleTimeString("en");
-    scheduleList = [streamUrl, nowString, "https://www.twitch.tv/drops/campaigns", returnString];
-    sessionStorage.setItem("scheduleStorage", scheduleString());
+    queueStreamFor(normalizeTwitchUrl(streamUrl), watchMinutes);
     sessionStorage.setItem("farmingGameIdx", idx.toString());
     sessionStorage.setItem("farmingGameName", game.name);
     sessionStorage.setItem("farmingCampaignName", campaign.name);
@@ -908,20 +914,7 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
     processSchedule();
 }
 
-function queueFallbackChannel(channelUrl) {
-    var settings = getDropSettings();
-    var watchMinutes = settings.fallbackMinutes || 30;
-    if(channelUrl.includes("twitch.tv/directory/category") && !channelUrl.includes("?filter=drops&sort=VIEWER_COUNT")) {
-        channelUrl = channelUrl.split("?")[0] + "?filter=drops&sort=VIEWER_COUNT";
-    } else if(!channelUrl.includes("/directory/category") && !channelUrl.includes("/about") && !channelUrl.includes("?filter=drops&sort=VIEWER_COUNT")) {
-        channelUrl += "/about";
-    }
-    var now = new Date();
-    var returnTime = new Date(now.getTime() + watchMinutes * 60 * 1000);
-    var nowString = now.toLocaleDateString("en-CA") + " " + now.toLocaleTimeString("en");
-    var returnString = returnTime.toLocaleDateString("en-CA") + " " + returnTime.toLocaleTimeString("en");
-    scheduleList = [channelUrl, nowString, "https://www.twitch.tv/drops/campaigns", returnString];
-    sessionStorage.setItem("scheduleStorage", scheduleString());
+function clearFarmingSessionState() {
     sessionStorage.removeItem("farmingGameName");
     sessionStorage.removeItem("farmingCampaignName");
     sessionStorage.removeItem("farmingGameIdx");
@@ -932,10 +925,16 @@ function queueFallbackChannel(channelUrl) {
     sessionStorage.removeItem("farmingStallNextIdx");
     sessionStorage.removeItem("farmingSkipCampaigns");
     sessionStorage.removeItem("farmingStallSameGame");
+}
+
+function queueFallbackChannel(channelUrl) {
+    var settings = getDropSettings();
+    var watchMinutes = settings.fallbackMinutes || 30;
+    clearFarmingSessionState();
+    queueStreamFor(normalizeTwitchUrl(channelUrl), watchMinutes);
     popupText("No drops available. Going to fallback for " + watchMinutes + " min");
     processSchedule();
 }
-
 
 function tryNextAvailableLink(gameName, campaignName) {
     var allLinks = JSON.parse(sessionStorage.getItem("farmingAllLinks") || "[]");
@@ -947,21 +946,13 @@ function tryNextAvailableLink(gameName, campaignName) {
     if (nextIndex >= 0 && allLinks[nextIndex]) {
         var nextHref = allLinks[nextIndex];
         var nextUrl = nextHref.startsWith('http') ? nextHref : "https://www.twitch.tv" + nextHref;
-        if (!nextUrl.includes("/directory/category") && !nextUrl.includes("/about")) {
-            nextUrl += "/about";
-        }
         sessionStorage.setItem("farmingLinkIndex", String(nextIndex));
         sessionStorage.removeItem("farmingLastProgress");
         var tracker = getDropsTracker();
         var campaign = tracker[gameName] && tracker[gameName].find(function(c) { return c.name === campaignName; });
         var settings = getDropSettings();
         var remainingMinutes = campaign ? calculateTimeRemaining(campaign.endDate) : (settings.fallbackMinutes || 30);
-        var now = new Date();
-        var returnTime = new Date(now.getTime() + remainingMinutes * 60 * 1000);
-        var nowString = now.toLocaleDateString("en-CA") + " " + now.toLocaleTimeString("en");
-        var returnString = returnTime.toLocaleDateString("en-CA") + " " + returnTime.toLocaleTimeString("en");
-        scheduleList = [nextUrl, nowString, "https://www.twitch.tv/drops/campaigns", returnString];
-        sessionStorage.setItem("scheduleStorage", scheduleString());
+        queueStreamFor(normalizeTwitchUrl(nextUrl), remainingMinutes);
         popupText("Stream stalled. Trying backup link: " + nextHref);
         processSchedule();
     } else {
@@ -978,32 +969,37 @@ function tryNextAvailableLink(gameName, campaignName) {
     }
 }
 
+function stopInventoryChecking() {
+    clearTimeout(inventoryCheckInterval);
+    inventoryCheckInterval = null;
+    sessionStorage.removeItem("inventoryCheckElapsedMinutes");
+}
+
 function startInventoryChecking() {
-    clearInterval(inventoryCheckInterval);
+    stopInventoryChecking();
     var settings = getDropSettings();
-    var checkIntervalMs = (settings.checkIntervalMinutes || 10) * 60 * 1000;
+    var checkIntervalMinutes = settings.checkIntervalMinutes || 10;
     var gameName = sessionStorage.getItem("farmingGameName");
     var campaignName = sessionStorage.getItem("farmingCampaignName");
     if (!gameName || !campaignName) return;
-    popupText("Starting inventory checks every " + (settings.checkIntervalMinutes || 10) + " min");
-    getInventoryIframe();
-    getCampaignsIframe();
-    inventoryCheckInterval = setInterval(function() {
+    popupText("Starting inventory checks every " + checkIntervalMinutes + " min");
+
+    function runInventoryCheck() {
         var campaign = getDropsTracker()[gameName]?.find(c => c.name === campaignName);
         if (!campaign) {
-            clearInterval(inventoryCheckInterval);
+            stopInventoryChecking();
             return;
         }
         checkInventoryForCampaign(campaignName, campaign.endDate).then(function(result) {
             if (!result.exists) {
                 markCampaignCompleted(gameName, campaignName, true);
-                clearInterval(inventoryCheckInterval);
+                stopInventoryChecking();
                 popupText("Campaign completed: " + campaignName + ". Returning to campaigns");
                 window.location.assign("https://www.twitch.tv/drops/campaigns");
             } else {
                 checkForHigherPriorityCampaign().then(function(higherFound) {
                     if (higherFound && sessionStorage.getItem("farmingIsStallFallback") !== "true") {
-                        clearInterval(inventoryCheckInterval);
+                        stopInventoryChecking();
                         popupText("Higher priority campaign available. Returning to campaigns");
                         window.location.assign("https://www.twitch.tv/drops/campaigns");
                     } else {
@@ -1015,7 +1011,7 @@ function startInventoryChecking() {
                                 var storedLinks = JSON.parse(sessionStorage.getItem("farmingAllLinks") || "[]");
                                 var isCategory = storedLinks.length > 0 && storedLinks[storedLinks.length - 1].includes("/directory/category");
                                 if (!isCategory) {
-                                    clearInterval(inventoryCheckInterval);
+                                    stopInventoryChecking();
                                     tryNextAvailableLink(gameName, campaignName);
                                 }
                             }
@@ -1024,9 +1020,31 @@ function startInventoryChecking() {
                 });
             }
         });
-    }, checkIntervalMs);
+    }
+
+    function tick() {
+        var elapsed = parseInt(sessionStorage.getItem("inventoryCheckElapsedMinutes") || "0") + 1;
+        if (elapsed >= checkIntervalMinutes) {
+            sessionStorage.setItem("inventoryCheckElapsedMinutes", "0");
+            runInventoryCheck();
+        } else {
+            sessionStorage.setItem("inventoryCheckElapsedMinutes", String(elapsed));
+        }
+        if (inventoryCheckInterval !== null) {
+            inventoryCheckInterval = setTimeout(tick, 60000);
+        }
+    }
+
+    inventoryCheckInterval = setTimeout(tick, 60000);
 }
 
+function getScheduleInput() {
+    return document.getElementById('TwitchScheduleGrabber').value.split("\n");
+}
+
+function setScheduleInput(list) {
+    document.getElementById('TwitchScheduleGrabber').value = list.join("\n");
+}
 
 function grabSchedule(string) {
     if(document.getElementById("TwitchScheduleOuterWrapper")) {
@@ -1070,68 +1088,62 @@ function buttonAdder(label, fn) {
 }
 
 function timeAdder(hours, minutes, seconds) {
-    scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
+    scheduleList = getScheduleInput();
     var scheduleEntryTime = new Date(scheduleList[scheduleList.length - 1]);
     scheduleEntryTime.setSeconds(scheduleEntryTime.getSeconds() + seconds);
     scheduleEntryTime.setMinutes(scheduleEntryTime.getMinutes() + minutes);
     scheduleEntryTime.setHours(scheduleEntryTime.getHours() + hours);
     var scheduleEntryTimeParsed = scheduleEntryTime.toLocaleDateString("en-CA") + " " + scheduleEntryTime.toLocaleTimeString("en");
-    scheduleList.splice(scheduleList.length - 1,1,scheduleEntryTimeParsed);
-    document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
+    scheduleList.splice(scheduleList.length - 1, 1, scheduleEntryTimeParsed);
+    setScheduleInput(scheduleList);
 }
 
 function parseLink() {
-    scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
+    scheduleList = getScheduleInput();
     if(scheduleList.length < 2) return null;
-    var nearestLink = scheduleList.at(-2);
-    if(nearestLink.includes("twitch.tv/directory/category") && !nearestLink.includes("?filter=drops&sort=VIEWER_COUNT")) {
-        nearestLink = nearestLink.split("?")[0] + "?filter=drops&sort=VIEWER_COUNT";
-    } else if(nearestLink.includes("twitch.tv/") && !nearestLink.includes("/about") && !nearestLink.includes("?filter=drops&sort=VIEWER_COUNT")) {
-        nearestLink += "/about";
-    }
-    scheduleList.splice(-2,1,nearestLink);
-    document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
+    var nearestLink = normalizeTwitchUrl(scheduleList.at(-2));
+    scheduleList.splice(-2, 1, nearestLink);
+    setScheduleInput(scheduleList);
 }
 
 function duplicateLine() {
-    scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
+    scheduleList = getScheduleInput();
     if(scheduleList.length < 2) return null;
     scheduleList.push(...scheduleList.slice(-2));
-    document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
+    setScheduleInput(scheduleList);
 }
 
 function returnToPrevious() {
-    scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
+    scheduleList = getScheduleInput();
     if(scheduleList.length < 4) return null;
-    var previousTime = document.getElementById('TwitchScheduleGrabber').value.split("\n").at(-1).split(" ");
+    var previousTime = scheduleList.at(-1).split(" ");
     previousTime = " " + previousTime.at(-2) + " " + previousTime.at(-1);
-    var defaultLink = window.location.href;
-    defaultLink = document.getElementById('TwitchScheduleGrabber').value.split("\n").at(-4);
-    scheduleList.push(...[defaultLink,currentDateString + previousTime]);
-    document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
+    var defaultLink = scheduleList.at(-4);
+    scheduleList.push(...[defaultLink, currentDateString + previousTime]);
+    setScheduleInput(scheduleList);
 }
 
 function addCurrentPage() {
-    scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
-    var previousTime = document.getElementById('TwitchScheduleGrabber').value.split("\n").at(-1).split(" ");
+    scheduleList = getScheduleInput();
     var defaultLink = window.location.href;
     if(scheduleList.length < 2) {
-        previousTime = currentTimeString("roundup");
-        scheduleList = [defaultLink,currentDateString + previousTime];
+        scheduleList = [defaultLink, currentDateString + currentTimeString("roundup")];
     } else {
+        var previousTime = scheduleList.at(-1).split(" ");
         previousTime = " " + previousTime.at(-2) + " " + previousTime.at(-1);
-        scheduleList.push(...[defaultLink,currentDateString + previousTime]);
+        scheduleList.push(...[defaultLink, currentDateString + previousTime]);
     }
-    document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
+    setScheduleInput(scheduleList);
 }
 
 function addEntry() {
-    scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
-    var previousTime = document.getElementById('TwitchScheduleGrabber').value.split("\n").at(-1).split(" ");
-    if(previousTime.length < 2) {
+    scheduleList = getScheduleInput();
+    var previousTime;
+    if(scheduleList.at(-1).split(" ").length < 2) {
         previousTime = currentTimeString("roundup");
     } else {
-        previousTime = " " + previousTime.at(-2) + " " + previousTime.at(-1);
+        var parts = scheduleList.at(-1).split(" ");
+        previousTime = " " + parts.at(-2) + " " + parts.at(-1);
     }
     var defaultLink = window.location.href;
     navigator.clipboard.readText().then(text => {
@@ -1139,42 +1151,38 @@ function addEntry() {
             defaultLink = text;
         }
         if(scheduleList.length < 2) {
-            scheduleList = [defaultLink,currentDateString + previousTime];
+            scheduleList = [defaultLink, currentDateString + previousTime];
         } else {
-            scheduleList.push(...[defaultLink,currentDateString + previousTime]);
+            scheduleList.push(...[defaultLink, currentDateString + previousTime]);
         }
-        document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
-    })
+        setScheduleInput(scheduleList);
+    });
 }
 
 function removeEntry() {
-    scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
-    scheduleList.splice(scheduleList.length - 2,2);
-    document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
+    scheduleList = getScheduleInput();
+    scheduleList.splice(scheduleList.length - 2, 2);
+    setScheduleInput(scheduleList);
 }
 
 function toggleAMPM() {
-    scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
+    scheduleList = getScheduleInput();
     if(scheduleList.length < 2) return null;
     var scheduleEntry = scheduleList[scheduleList.length - 1].split(" ");
-    if(scheduleEntry[scheduleEntry.length - 1].includes("AM")) {
-        scheduleEntry[scheduleEntry.length - 1] = "PM";
-    } else {
-        scheduleEntry[scheduleEntry.length - 1] = "AM";
-    }
-    scheduleList.splice(scheduleList.length - 1,1,scheduleEntry.join(" "));
-    document.getElementById('TwitchScheduleGrabber').value = scheduleList.join("\n");
+    scheduleEntry[scheduleEntry.length - 1] = scheduleEntry[scheduleEntry.length - 1].includes("AM") ? "PM" : "AM";
+    scheduleList.splice(scheduleList.length - 1, 1, scheduleEntry.join(" "));
+    setScheduleInput(scheduleList);
 }
 
 function readSchedule() {
-    scheduleList = document.getElementById('TwitchScheduleGrabber').value.split("\n");
+    scheduleList = getScheduleInput();
     if(scheduleList.length % 2 != 0) {
         popupText("Odd Queue Count? Possible Malformed Queue");
         return;
     }
     clearTimeout(scheduleTimeout);
     document.getElementById("TwitchScheduleOuterWrapper").remove();
-    sessionStorage.setItem("scheduleStorage",scheduleString());
+    sessionStorage.setItem("scheduleStorage", scheduleString());
     processSchedule();
 }
 
@@ -1206,27 +1214,26 @@ function processSchedule() {
 function gotoNextWebsite() {
     clearTimeout(scheduleTimeout);
     var nextWebsite = scheduleList[0];
-    scheduleList.splice(0,2);
-    sessionStorage.setItem("scheduleStorage",scheduleString());
+    scheduleList.splice(0, 2);
+    sessionStorage.setItem("scheduleStorage", scheduleString());
     popupText("Moving to next website: " + nextWebsite);
     window.location.assign(nextWebsite);
 }
 
 function cancelQueue() {
     clearTimeout(scheduleTimeout);
-    clearInterval(inventoryCheckInterval);
+    stopInventoryChecking();
+    if (inventoryIframe && inventoryIframe.parentNode) {
+        inventoryIframe.parentNode.removeChild(inventoryIframe);
+        inventoryIframe = null;
+    }
+    if (campaignsIframe && campaignsIframe.parentNode) {
+        campaignsIframe.parentNode.removeChild(campaignsIframe);
+        campaignsIframe = null;
+    }
     document.getElementById("TwitchScheduleOuterWrapper")?.remove();
     sessionStorage.removeItem("scheduleStorage");
-    sessionStorage.removeItem("farmingGameName");
-    sessionStorage.removeItem("farmingCampaignName");
-    sessionStorage.removeItem("farmingGameIdx");
-    sessionStorage.removeItem("farmingAllLinks");
-    sessionStorage.removeItem("farmingLinkIndex");
-    sessionStorage.removeItem("farmingLastProgress");
-    sessionStorage.removeItem("farmingIsStallFallback");
-    sessionStorage.removeItem("farmingStallNextIdx");
-    sessionStorage.removeItem("farmingSkipCampaigns");
-    sessionStorage.removeItem("farmingStallSameGame");
+    clearFarmingSessionState();
     scheduleList = [];
     currentFarmingGame = null;
     currentFarmingCampaign = null;
@@ -1293,6 +1300,6 @@ function popupText(string) {
 function removeConfirmPopup() {
     var existing = document.getElementById("userscriptPopupWindow");
     if (existing && existing.parentNode) {
-        existing.parentNode.removeChild(existing)
+        existing.parentNode.removeChild(existing);
     }
 }
