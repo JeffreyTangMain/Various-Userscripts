@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Hide Expired Twitch Drops
 // @namespace    https://www.twitch.tv/drops/
-// @version      1.0
+// @version      1.0.1
 // @description  Hide Expired Twitch Drops
 // @author       Main
 // @match        https://www.twitch.tv/drops/inventory
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=twitch.tv
 // @require      http://code.jquery.com/jquery-3.4.1.min.js
 // @grant        GM_addStyle
+// @noframes
 // ==/UserScript==
 /* globals $ */
 
