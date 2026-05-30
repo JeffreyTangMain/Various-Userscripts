@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.10.0
+// @version      1.11.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -605,19 +605,51 @@ function findCampaignContainer(header) {
     return null;
 }
 
+function findCampaignContainerAllSiblings(header) {
+    var el = header;
+    while (el && el !== document.body) {
+        var sib = el.nextElementSibling;
+        while (sib) {
+            if (sib.querySelector('button[aria-expanded]')) return sib;
+            sib = sib.nextElementSibling;
+        }
+        el = el.parentElement;
+    }
+    return null;
+}
+
 function injectDropButtons() {
     var observer = new MutationObserver(function() {
-        var header = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Drop Campaigns");
-        if(!header) return;
-        var campaignContainer = findCampaignContainer(header);
+        var dropHeader = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Drop Campaigns");
+        if(!dropHeader) return;
+        var campaignContainer = findCampaignContainer(dropHeader);
         if(!campaignContainer) return;
         observer.disconnect();
+        var rewardHeader = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Reward Campaigns");
+        if (rewardHeader) {
+            var rewardContainer = findCampaignContainerAllSiblings(rewardHeader);
+            if (rewardContainer) renderRewardButtons(rewardContainer);
+        }
         renderDropButtons(campaignContainer);
+        renderClosedDropButtons();
+        var closedObserver = new MutationObserver(function() {
+            if (renderClosedDropButtons()) closedObserver.disconnect();
+        });
+        closedObserver.observe(document.body, { childList: true, subtree: true });
         if(sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") == "true" && window.location.pathname === "/drops/campaigns") {
             autoFarmCampaigns();
         }
     });
     observer.observe(document.body, { childList: true, subtree: true });
+}
+
+function renderClosedDropButtons() {
+    var closedHeader = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Closed Drop Campaigns");
+    if (!closedHeader) return false;
+    var closedContainer = findCampaignContainerAllSiblings(closedHeader);
+    if (!closedContainer) return false;
+    renderDropButtons(closedContainer);
+    return true;
 }
 
 function renderDropButtons(campaignContainer) {
@@ -651,6 +683,127 @@ function updateDropBtn(btn, gameName) {
     btn.textContent = inList ? '−' : '+';
     btn.style.background = inList ? '#1a0a2e' : '#2a2a35';
     btn.style.color = inList ? '#9147ff' : '#adadb8';
+}
+
+function renderRewardButtons(rewardContainer) {
+    Array.from(rewardContainer.children).forEach(function(row) {
+        if (row.querySelector('.atq-drop-btn')) return;
+        var imgEl = row.querySelector('img.partner-thumbnail');
+        if (!imgEl || !imgEl.alt) return;
+        var gameName = imgEl.alt;
+        var header = row.querySelector('.accordion-header, [role="heading"]');
+        if (!header) return;
+        var btn = document.createElement('button');
+        btn.className = 'atq-drop-btn';
+        btn.style.cssText = "position:absolute; left:6px; top:50%; transform:translateY(-50%); z-index:9999; width:22px; height:22px; border:none; border-radius:4px; font-size:15px; font-weight:700; line-height:1; cursor:pointer; transition:background 0.12s, color 0.12s; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; display:flex; align-items:center; justify-content:center;";
+        updateDropBtn(btn, gameName);
+        btn.addEventListener('mouseenter', function() { btn.style.background = '#9147ff'; btn.style.color = '#fff'; });
+        btn.addEventListener('mouseleave', function() { updateDropBtn(btn, gameName); });
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            toggleDropGame(gameName);
+            updateDropBtn(btn, gameName);
+        });
+        header.style.position = 'relative';
+        var accordionToggle = header.querySelector('button');
+        if (accordionToggle) accordionToggle.style.paddingLeft = '2.5rem';
+        header.appendChild(btn);
+    });
+}
+
+function farmRewardCampaign(game, rewardRow, list, idx) {
+    if (rewardRow.querySelector('.drop-details__label')) {
+        parseRewardAndQueue(game, rewardRow, list, idx);
+        return;
+    }
+    var accordionBtn = rewardRow.querySelector('button[aria-expanded]');
+    var parseTimer = null;
+    var detailObserver = new MutationObserver(function() {
+        if (!rewardRow.querySelector('.drop-details__label')) return;
+        clearTimeout(parseTimer);
+        parseTimer = setTimeout(function() {
+            detailObserver.disconnect();
+            parseRewardAndQueue(game, rewardRow, list, idx);
+        }, 500);
+    });
+    detailObserver.observe(rewardRow, { childList: true, subtree: true });
+    if (accordionBtn && accordionBtn.getAttribute('aria-expanded') !== 'true') {
+        accordionBtn.click();
+    }
+}
+
+function parseRewardAndQueue(game, rewardRow, list, idx) {
+    var dateEl = rewardRow.querySelector('[class*="caYeGJ"]');
+    var endDate = dateEl ? parseEndDateFromRange(dateEl.textContent.trim()) : null;
+
+    var rewardNames = [];
+    rewardRow.querySelectorAll('.drop-benefit__image-container img').forEach(function(img) {
+        if (img.alt) rewardNames.push(img.alt);
+    });
+    if (rewardNames.length === 0) {
+        var rewardsLabel = Array.from(rewardRow.querySelectorAll('.drop-details__label')).find(function(l) {
+            return l.textContent.trim() === 'Rewards';
+        });
+        if (rewardsLabel) {
+            rewardsLabel.parentElement.querySelectorAll('p').forEach(function(p) {
+                var t = p.textContent.trim();
+                if (t) rewardNames.push(t);
+            });
+        }
+    }
+
+    var earnLabel = Array.from(rewardRow.querySelectorAll('.drop-details__label')).find(function(l) {
+        return /how to earn/i.test(l.textContent);
+    });
+    var watchMinutes = 30;
+    var categoryHref = null;
+    if (earnLabel) {
+        var earnSection = earnLabel.parentElement;
+        var strongEl = earnSection.querySelector('strong');
+        if (strongEl) {
+            var m = strongEl.textContent.match(/(\d+)/);
+            if (m) watchMinutes = parseInt(m[1]);
+        }
+        earnSection.querySelectorAll('a').forEach(function(a) {
+            var href = a.getAttribute('href');
+            if (href && href.includes('/directory/category')) categoryHref = href;
+        });
+    }
+
+    if (!categoryHref) {
+        popupText("No category link found for: " + game.name + ", skipping");
+        farmNextPriority(list, idx + 1);
+        return;
+    }
+
+    var campaignName = rewardNames.length > 0 ? rewardNames[0] : (game.name + " Reward");
+    addCampaignToTracker(game.name, campaignName, endDate);
+
+    var tracker = getDropsTracker();
+    var trackedCampaign = tracker[game.name] && tracker[game.name].find(function(c) { return c.name === campaignName; });
+    if (trackedCampaign && trackedCampaign.completed) {
+        popupText("Reward already completed: " + campaignName + ", moving to next");
+        farmNextPriority(list, idx + 1);
+        return;
+    }
+
+    var streamUrl = (categoryHref.startsWith('http') ? categoryHref : "https://www.twitch.tv" + categoryHref);
+    streamUrl = normalizeTwitchUrl(streamUrl);
+
+    var settings = getDropSettings();
+    var isStallFallback = sessionStorage.getItem("farmingIsStallFallback") === "true";
+    var remainingMinutes = endDate ? calculateTimeRemaining(endDate) : watchMinutes;
+    var finalMinutes = isStallFallback ? (settings.fallbackMinutes || 30) : (remainingMinutes > 0 ? remainingMinutes : watchMinutes);
+
+    sessionStorage.setItem("farmingAllLinks", JSON.stringify([categoryHref]));
+    sessionStorage.setItem("farmingLinkIndex", "0");
+    sessionStorage.removeItem("farmingLastProgress");
+    queueStreamFor(streamUrl, finalMinutes);
+    sessionStorage.setItem("farmingGameIdx", idx.toString());
+    sessionStorage.setItem("farmingGameName", game.name);
+    sessionStorage.setItem("farmingCampaignName", campaignName);
+    popupText("Queued reward: " + campaignName + " for " + finalMinutes + " min");
+    processSchedule();
 }
 
 function getDropList() {
@@ -732,6 +885,20 @@ function farmNextPriority(list, idx) {
         return;
     }
     var game = list[idx];
+    var rewardHeader = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Reward Campaigns");
+    if (rewardHeader) {
+        var rewardContainer = findCampaignContainerAllSiblings(rewardHeader);
+        if (rewardContainer) {
+            var rewardRow = Array.from(rewardContainer.children).find(function(row) {
+                var imgEl = row.querySelector('img.partner-thumbnail');
+                return imgEl && imgEl.alt === game.name;
+            });
+            if (rewardRow) {
+                farmRewardCampaign(game, rewardRow, list, idx);
+                return;
+            }
+        }
+    }
     var header = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Drop Campaigns");
     if(!header) {
         popupText("Could not find campaigns list");
