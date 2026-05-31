@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.11.0
+// @version      1.12.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -422,6 +422,8 @@ function openCampaignManager() {
 
     var list = getDropList();
     var settings = getDropSettings();
+    var fallbackChannels = (settings.fallbackChannels || []).slice();
+    var localTracker = JSON.parse(JSON.stringify(getDropsTracker()));
 
     var outer = document.createElement('div');
     outer.id = 'CampaignManagerWrapper';
@@ -440,28 +442,23 @@ function openCampaignManager() {
 
     var checkInput = mkInput('number', settings.checkIntervalMinutes || 10, 'atq-input-num');
     var offlineCheckInput = mkInput('number', settings.offlineCheckMinutes || 1, 'atq-input-num');
+    var fallbackMinInput = mkInput('number', settings.fallbackMinutes || 30, 'atq-input-num');
     var r1 = document.createElement('div');
     r1.className = 'atq-row';
     r1.appendChild(mkLabel('Drop Check Minutes:')); r1.appendChild(checkInput);
     r1.appendChild(mkLabel('Offline Check Minutes:')); r1.appendChild(offlineCheckInput);
-
-    var fallbackInput = mkInput('text', settings.fallbackChannel || '', 'atq-input-url');
-    fallbackInput.placeholder = 'Fallback channel URL';
-    var fallbackMinInput = mkInput('number', settings.fallbackMinutes || 30, 'atq-input-num');
-    var r2 = document.createElement('div');
-    r2.className = 'atq-row';
-    r2.appendChild(mkLabel('Fallback')); r2.appendChild(fallbackInput);
-    r2.appendChild(mkLabel('for')); r2.appendChild(fallbackMinInput); r2.appendChild(mkLabel('min'));
+    r1.appendChild(mkLabel('Fallback Duration:')); r1.appendChild(fallbackMinInput); r1.appendChild(mkLabel('min'));
 
     settingsDiv.appendChild(r1);
-    settingsDiv.appendChild(r2);
     outer.appendChild(settingsDiv);
 
     var tabsDiv = document.createElement('div');
     tabsDiv.className = 'atq-tabs';
     var priorityTabBtn = mkBtn('Priority', function() { setTab('priority'); }, 'atq-tab');
+    var fallbackTabBtn = mkBtn('Fallback', function() { setTab('fallback'); }, 'atq-tab');
     var trackerTabBtn = mkBtn('Tracker', function() { setTab('tracker'); }, 'atq-tab');
     tabsDiv.appendChild(priorityTabBtn);
+    tabsDiv.appendChild(fallbackTabBtn);
     tabsDiv.appendChild(trackerTabBtn);
     outer.appendChild(tabsDiv);
 
@@ -478,9 +475,10 @@ function openCampaignManager() {
         GM_setValue('dropSettings', {
             checkIntervalMinutes: parseInt(checkInput.value) || 10,
             offlineCheckMinutes: parseInt(offlineCheckInput.value) || 1,
-            fallbackChannel: fallbackInput.value.trim(),
+            fallbackChannels: fallbackChannels,
             fallbackMinutes: parseInt(fallbackMinInput.value) || 30
         });
+        setDropsTracker(localTracker);
         popupText('Settings saved');
     }
 
@@ -520,11 +518,65 @@ function openCampaignManager() {
         });
     }
 
+    function renderFallback() {
+        contentArea.innerHTML = '';
+        var addRow = document.createElement('div');
+        addRow.className = 'atq-row';
+        addRow.style.marginBottom = '4px';
+        var addInput = mkInput('text', '', 'atq-input-url');
+        addInput.placeholder = 'https://www.twitch.tv/channelname';
+        function doAdd() {
+            var val = addInput.value.trim();
+            if (!val) return;
+            if (!isValidHttpUrl(val)) { popupText('Invalid URL'); return; }
+            fallbackChannels.push(val);
+            addInput.value = '';
+            renderFallback();
+        }
+        addInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') doAdd(); });
+        addRow.appendChild(mkLabel('Add:'));
+        addRow.appendChild(addInput);
+        addRow.appendChild(mkBtn('Add', doAdd, 'atq-btn atq-btn-primary atq-btn-sm'));
+        contentArea.appendChild(addRow);
+        if (fallbackChannels.length === 0) {
+            var empty = document.createElement('div');
+            empty.className = 'atq-empty';
+            empty.textContent = 'No fallback channels. Add one above.';
+            contentArea.appendChild(empty);
+            return;
+        }
+        fallbackChannels.forEach(function(channel, idx) {
+            var item = document.createElement('div');
+            item.className = 'atq-item';
+            item.appendChild(mkBtn('▲', function() {
+                if (idx === 0) return;
+                var tmp = fallbackChannels[idx - 1]; fallbackChannels[idx - 1] = fallbackChannels[idx]; fallbackChannels[idx] = tmp;
+                renderFallback();
+            }, 'atq-btn atq-btn-icon'));
+            item.appendChild(mkBtn('▼', function() {
+                if (idx === fallbackChannels.length - 1) return;
+                var tmp = fallbackChannels[idx + 1]; fallbackChannels[idx + 1] = fallbackChannels[idx]; fallbackChannels[idx] = tmp;
+                renderFallback();
+            }, 'atq-btn atq-btn-icon'));
+            var lbl = document.createElement('span');
+            lbl.className = 'atq-item-label';
+            var displayName = channel;
+            try { displayName = new URL(channel).pathname.replace(/^\//, '') || channel; } catch(e) {}
+            lbl.textContent = (idx + 1) + '. ' + displayName;
+            lbl.title = channel;
+            item.appendChild(lbl);
+            item.appendChild(mkBtn('✕', function() {
+                fallbackChannels.splice(idx, 1);
+                renderFallback();
+            }, 'atq-btn atq-btn-icon atq-btn-danger'));
+            contentArea.appendChild(item);
+        });
+    }
+
     function renderTracker() {
         contentArea.innerHTML = '';
-        var tracker = getDropsTracker();
-        if (!tracker || typeof tracker !== 'object') { tracker = {}; setDropsTracker(tracker); }
-        var gameNames = Object.keys(tracker).sort();
+        if (!localTracker || typeof localTracker !== 'object') { localTracker = {}; }
+        var gameNames = Object.keys(localTracker).sort();
         if (gameNames.length === 0) {
             var empty = document.createElement('div');
             empty.className = 'atq-empty';
@@ -537,8 +589,8 @@ function openCampaignManager() {
             gh.className = 'atq-game-header';
             gh.textContent = gameName;
             contentArea.appendChild(gh);
-            var campaigns = tracker[gameName];
-            if (!Array.isArray(campaigns)) { tracker[gameName] = []; campaigns = []; }
+            var campaigns = localTracker[gameName];
+            if (!Array.isArray(campaigns)) { localTracker[gameName] = []; campaigns = []; }
             campaigns.forEach(function(campaign) {
                 var item = document.createElement('div');
                 item.className = 'atq-item';
@@ -546,15 +598,15 @@ function openCampaignManager() {
                 lbl.className = 'atq-item-label' + (campaign.completed ? ' done' : '');
                 lbl.textContent = campaign.name + '  —  ends ' + campaign.endDate;
                 item.appendChild(mkBtn(campaign.completed ? 'Unmark' : 'Mark Done', function() {
-                    var newState = !campaign.completed;
-                    markCampaignCompleted(gameName, campaign.name, newState);
-                    popupText((newState ? 'Completed: ' : 'Unmarked: ') + campaign.name);
+                    campaign.completed = !campaign.completed;
+                    popupText((campaign.completed ? 'Completed: ' : 'Unmarked: ') + campaign.name);
                     renderTracker();
                 }, 'atq-btn atq-btn-sm'));
                 item.appendChild(lbl);
                 item.appendChild(mkBtn('✕', function() {
                     var name = campaign.name;
-                    deleteCampaignFromTracker(gameName, name);
+                    localTracker[gameName] = localTracker[gameName].filter(function(c) { return c.name !== name; });
+                    if (localTracker[gameName].length === 0) delete localTracker[gameName];
                     popupText('Deleted: ' + name);
                     renderTracker();
                 }, 'atq-btn atq-btn-icon atq-btn-danger'));
@@ -565,24 +617,32 @@ function openCampaignManager() {
 
     function setTab(tab) {
         priorityTabBtn.classList.toggle('atq-active', tab === 'priority');
+        fallbackTabBtn.classList.toggle('atq-active', tab === 'fallback');
         trackerTabBtn.classList.toggle('atq-active', tab === 'tracker');
         footer.innerHTML = '';
         if (tab === 'priority') {
             renderPriority();
             footer.appendChild(mkBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
+        } else if (tab === 'fallback') {
+            renderFallback();
+            footer.appendChild(mkBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
         } else {
             renderTracker();
+            footer.appendChild(mkBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
             footer.appendChild(mkBtn('Delete Expired', function() {
-                var before = Object.values(getDropsTracker()).reduce(function(s, a) { return s + a.length; }, 0);
-                deleteExpiredFromTracker();
-                var after = Object.values(getDropsTracker()).reduce(function(s, a) { return s + a.length; }, 0);
+                var before = Object.values(localTracker).reduce(function(s, a) { return s + a.length; }, 0);
+                Object.keys(localTracker).forEach(function(gn) {
+                    localTracker[gn] = localTracker[gn].filter(function(c) { return calculateTimeRemaining(c.endDate) >= -60; });
+                    if (localTracker[gn].length === 0) delete localTracker[gn];
+                });
+                var after = Object.values(localTracker).reduce(function(s, a) { return s + a.length; }, 0);
                 var n = before - after;
                 renderTracker();
                 popupText(n > 0 ? 'Deleted ' + n + ' expired campaign' + (n !== 1 ? 's' : '') + '.' : 'No expired campaigns to delete');
             }, 'atq-btn atq-btn-sm'));
             footer.appendChild(mkBtn('Delete All', function() {
                 if (confirm('Delete all tracked campaigns?')) {
-                    deleteAllFromTracker();
+                    localTracker = {};
                     renderTracker();
                     popupText('All campaigns deleted');
                 }
@@ -811,7 +871,16 @@ function getDropList() {
 }
 
 function getDropSettings() {
-    return GM_getValue('dropSettings', { checkIntervalMinutes: 10, offlineCheckMinutes: 1, fallbackChannel: '', fallbackMinutes: 30 });
+    var s = GM_getValue('dropSettings', {});
+    if (!s.fallbackChannels) {
+        s.fallbackChannels = s.fallbackChannel ? [s.fallbackChannel] : [];
+    }
+    return {
+        checkIntervalMinutes: s.checkIntervalMinutes || 10,
+        offlineCheckMinutes: s.offlineCheckMinutes || 1,
+        fallbackChannels: s.fallbackChannels,
+        fallbackMinutes: s.fallbackMinutes || 30
+    };
 }
 
 function toggleDropGame(gameName) {
@@ -826,9 +895,9 @@ function toggleDropGame(gameName) {
 }
 
 function useFallbackOr(message) {
-    var fallback = getDropSettings().fallbackChannel;
-    if (fallback) {
-        queueFallbackChannel(fallback);
+    var channels = getDropSettings().fallbackChannels;
+    if (channels && channels.length > 0) {
+        queueFallbackChannel(0);
     } else {
         popupText(message);
     }
@@ -1126,20 +1195,37 @@ function clearFarmingSessionState() {
     sessionStorage.removeItem("farmingStallNextIdx");
     sessionStorage.removeItem("farmingSkipCampaigns");
     sessionStorage.removeItem("farmingStallSameGame");
+    sessionStorage.removeItem("fallbackChannelIndex");
 }
 
-function queueFallbackChannel(channelUrl) {
+function queueFallbackChannel(idx) {
     var settings = getDropSettings();
+    var channels = settings.fallbackChannels || [];
+    if (!channels.length) return;
+    var channelUrl = channels[Math.min(idx, channels.length - 1)];
     var watchMinutes = settings.fallbackMinutes || 30;
     clearFarmingSessionState();
     var list = getDropList();
     sessionStorage.setItem("farmingGameName", "__fallback__");
     sessionStorage.setItem("farmingCampaignName", "__fallback__");
     sessionStorage.setItem("farmingGameIdx", String(list.length));
+    sessionStorage.setItem("fallbackChannelIndex", String(idx));
     sessionStorage.setItem("farmingIsStallFallback", "true");
     queueStreamFor(normalizeTwitchUrl(channelUrl), watchMinutes);
-    popupText("No drops available. Going to fallback for " + watchMinutes + " min");
+    popupText("No drops available. Trying fallback " + (idx + 1) + " for " + watchMinutes + " min");
     processSchedule();
+}
+
+function tryNextFallbackChannel() {
+    var channels = getDropSettings().fallbackChannels || [];
+    var idx = parseInt(sessionStorage.getItem("fallbackChannelIndex") || "0");
+    var nextIdx = idx + 1;
+    if (nextIdx < channels.length) {
+        popupText("Fallback " + (idx + 1) + " offline. Trying fallback " + (nextIdx + 1));
+        queueFallbackChannel(nextIdx);
+    } else {
+        popupText("All fallback channels offline. Waiting.");
+    }
 }
 
 function tryNextAvailableLink(gameName, campaignName) {
@@ -1213,9 +1299,7 @@ function runOfflineCheck() {
     if (streamAlive === false) {
         stopInventoryChecking();
         if (gn === "__fallback__") {
-            popupText("Fallback stream offline, waiting for queue timer");
-            clearTimeout(offlineCheckInterval);
-            offlineCheckInterval = null;
+            tryNextFallbackChannel();
         } else {
             popupText("Stream offline, trying next link");
             tryNextAvailableLink(gn, cn);
