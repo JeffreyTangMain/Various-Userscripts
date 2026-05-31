@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.12.0
+// @version      1.13.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -103,7 +103,10 @@ function checkForHigherPriorityCampaign() {
             try {
                 var doc = iframe.contentDocument || iframe.contentWindow.document;
                 if (!doc || !doc.body) { cleanup(); resolve(false); return; }
-                var searchRoot = doc;
+                var tracker = getDropsTracker();
+                var triggeringGame = null;
+
+                var dropSearchRoot = doc;
                 var openHeader = Array.from(doc.querySelectorAll('h4')).find(function(el) {
                     return el.textContent.trim() === "Open Drop Campaigns";
                 });
@@ -111,15 +114,12 @@ function checkForHigherPriorityCampaign() {
                     var el = openHeader;
                     while (el && el !== doc.body) {
                         var sib = el.nextElementSibling;
-                        if (sib && sib.querySelector('button[aria-expanded]')) { searchRoot = sib; break; }
+                        if (sib && sib.querySelector('button[aria-expanded]')) { dropSearchRoot = sib; break; }
                         el = el.parentElement;
                     }
                 }
-                popupText("Debug: Priority check scope=" + (searchRoot === doc ? "full page (no open header found)" : "open campaigns only"));
-                var accordionBtns = searchRoot.querySelectorAll('button[aria-expanded]');
-                var tracker = getDropsTracker();
-                var triggeringGame = null;
-                var found = Array.from(accordionBtns).some(function(btn) {
+                popupText("Debug: Priority check scope=" + (dropSearchRoot === doc ? "full page" : "open drop campaigns only"));
+                var found = Array.from(dropSearchRoot.querySelectorAll('button[aria-expanded]')).some(function(btn) {
                     var pEl = btn.querySelector('p');
                     if (!pEl) return false;
                     var gameName = pEl.textContent.trim();
@@ -129,6 +129,46 @@ function checkForHigherPriorityCampaign() {
                     if (!allCompleted) { triggeringGame = gameName; return true; }
                     return false;
                 });
+
+                if (!found) {
+                    var rewardHeader = Array.from(doc.querySelectorAll('h4')).find(function(el) {
+                        return el.textContent.trim() === "Open Reward Campaigns";
+                    });
+                    if (rewardHeader) {
+                        var rewardContainer = null;
+                        var rel = rewardHeader;
+                        while (rel && rel !== doc.body) {
+                            var rsib = rel.nextElementSibling;
+                            while (rsib) {
+                                if (rsib.querySelector('button[aria-expanded]')) { rewardContainer = rsib; break; }
+                                rsib = rsib.nextElementSibling;
+                            }
+                            if (rewardContainer) break;
+                            rel = rel.parentElement;
+                        }
+                        if (rewardContainer) {
+                            var seen = [];
+                            var rewardRows = Array.from(rewardContainer.querySelectorAll('.accordion-header')).map(function(h) {
+                                return h.parentElement;
+                            }).filter(function(row) {
+                                if (seen.indexOf(row) !== -1) return false;
+                                seen.push(row);
+                                return true;
+                            });
+                            found = rewardRows.some(function(row) {
+                                var imgEl = row.querySelector('img.partner-thumbnail');
+                                if (!imgEl || !imgEl.alt) return false;
+                                var gameName = imgEl.alt;
+                                if (!higherPriorityNames.includes(gameName)) return false;
+                                var trackedCampaigns = tracker[gameName];
+                                var allCompleted = trackedCampaigns && trackedCampaigns.length > 0 && trackedCampaigns.every(function(c) { return c.completed; });
+                                if (!allCompleted) { triggeringGame = gameName; return true; }
+                                return false;
+                            });
+                        }
+                    }
+                }
+
                 popupText("Debug: Priority check result=" + found + (triggeringGame ? " triggered by: " + triggeringGame : ""));
                 cleanup();
                 resolve(found);
@@ -480,6 +520,7 @@ function openCampaignManager() {
         });
         setDropsTracker(localTracker);
         popupText('Settings saved');
+        refreshAllDropBtns();
     }
 
     function renderPriority() {
@@ -722,6 +763,7 @@ function renderDropButtons(campaignContainer) {
         if(!header) return;
         var btn = document.createElement('button');
         btn.className = 'atq-drop-btn';
+        btn.dataset.atqGame = gameName;
         btn.style.cssText = "position:absolute; left:6px; top:50%; transform:translateY(-50%); z-index:9999; width:22px; height:22px; border:none; border-radius:4px; font-size:15px; font-weight:700; line-height:1; cursor:pointer; transition:background 0.12s, color 0.12s; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; display:flex; align-items:center; justify-content:center;";
         updateDropBtn(btn, gameName);
         btn.addEventListener('mouseenter', function() { btn.style.background = '#9147ff'; btn.style.color = '#fff'; });
@@ -729,12 +771,18 @@ function renderDropButtons(campaignContainer) {
         btn.addEventListener('click', function(e) {
             e.stopPropagation();
             toggleDropGame(gameName);
-            updateDropBtn(btn, gameName);
+            refreshAllDropBtns();
         });
         header.style.position = 'relative';
         var accordionToggle = header.querySelector('button');
         if(accordionToggle) accordionToggle.style.paddingLeft = '2.5rem';
         header.appendChild(btn);
+    });
+}
+
+function refreshAllDropBtns() {
+    document.querySelectorAll('.atq-drop-btn[data-atq-game]').forEach(function(btn) {
+        updateDropBtn(btn, btn.dataset.atqGame);
     });
 }
 
@@ -745,8 +793,19 @@ function updateDropBtn(btn, gameName) {
     btn.style.color = inList ? '#9147ff' : '#adadb8';
 }
 
+function getRewardRows(rewardContainer) {
+    var seen = [];
+    return Array.from(rewardContainer.querySelectorAll('.accordion-header')).map(function(h) {
+        return h.parentElement;
+    }).filter(function(row) {
+        if (seen.indexOf(row) !== -1) return false;
+        seen.push(row);
+        return true;
+    });
+}
+
 function renderRewardButtons(rewardContainer) {
-    Array.from(rewardContainer.children).forEach(function(row) {
+    getRewardRows(rewardContainer).forEach(function(row) {
         if (row.querySelector('.atq-drop-btn')) return;
         var imgEl = row.querySelector('img.partner-thumbnail');
         if (!imgEl || !imgEl.alt) return;
@@ -755,6 +814,7 @@ function renderRewardButtons(rewardContainer) {
         if (!header) return;
         var btn = document.createElement('button');
         btn.className = 'atq-drop-btn';
+        btn.dataset.atqGame = gameName;
         btn.style.cssText = "position:absolute; left:6px; top:50%; transform:translateY(-50%); z-index:9999; width:22px; height:22px; border:none; border-radius:4px; font-size:15px; font-weight:700; line-height:1; cursor:pointer; transition:background 0.12s, color 0.12s; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; display:flex; align-items:center; justify-content:center;";
         updateDropBtn(btn, gameName);
         btn.addEventListener('mouseenter', function() { btn.style.background = '#9147ff'; btn.style.color = '#fff'; });
@@ -762,7 +822,7 @@ function renderRewardButtons(rewardContainer) {
         btn.addEventListener('click', function(e) {
             e.stopPropagation();
             toggleDropGame(gameName);
-            updateDropBtn(btn, gameName);
+            refreshAllDropBtns();
         });
         header.style.position = 'relative';
         var accordionToggle = header.querySelector('button');
@@ -771,9 +831,14 @@ function renderRewardButtons(rewardContainer) {
     });
 }
 
-function farmRewardCampaign(game, rewardRow, list, idx) {
+function farmRewardCampaign(game, rewardRows, rowIdx, list, idx) {
+    if (rowIdx >= rewardRows.length) {
+        farmNextPriority(list, idx + 1);
+        return;
+    }
+    var rewardRow = rewardRows[rowIdx];
     if (rewardRow.querySelector('.drop-details__label')) {
-        parseRewardAndQueue(game, rewardRow, list, idx);
+        parseRewardAndQueue(game, rewardRow, rewardRows, rowIdx, list, idx);
         return;
     }
     var accordionBtn = rewardRow.querySelector('button[aria-expanded]');
@@ -783,7 +848,7 @@ function farmRewardCampaign(game, rewardRow, list, idx) {
         clearTimeout(parseTimer);
         parseTimer = setTimeout(function() {
             detailObserver.disconnect();
-            parseRewardAndQueue(game, rewardRow, list, idx);
+            parseRewardAndQueue(game, rewardRow, rewardRows, rowIdx, list, idx);
         }, 500);
     });
     detailObserver.observe(rewardRow, { childList: true, subtree: true });
@@ -792,7 +857,7 @@ function farmRewardCampaign(game, rewardRow, list, idx) {
     }
 }
 
-function parseRewardAndQueue(game, rewardRow, list, idx) {
+function parseRewardAndQueue(game, rewardRow, rewardRows, rowIdx, list, idx) {
     var dateEl = rewardRow.querySelector('[class*="caYeGJ"]');
     var endDate = dateEl ? parseEndDateFromRange(dateEl.textContent.trim()) : null;
 
@@ -832,7 +897,7 @@ function parseRewardAndQueue(game, rewardRow, list, idx) {
 
     if (!categoryHref) {
         popupText("No category link found for: " + game.name + ", skipping");
-        farmNextPriority(list, idx + 1);
+        farmRewardCampaign(game, rewardRows, rowIdx + 1, list, idx);
         return;
     }
 
@@ -842,8 +907,8 @@ function parseRewardAndQueue(game, rewardRow, list, idx) {
     var tracker = getDropsTracker();
     var trackedCampaign = tracker[game.name] && tracker[game.name].find(function(c) { return c.name === campaignName; });
     if (trackedCampaign && trackedCampaign.completed) {
-        popupText("Reward already completed: " + campaignName + ", moving to next");
-        farmNextPriority(list, idx + 1);
+        popupText("Reward already completed: " + campaignName + ", moving to next reward");
+        farmRewardCampaign(game, rewardRows, rowIdx + 1, list, idx);
         return;
     }
 
@@ -958,12 +1023,12 @@ function farmNextPriority(list, idx) {
     if (rewardHeader) {
         var rewardContainer = findCampaignContainerAllSiblings(rewardHeader);
         if (rewardContainer) {
-            var rewardRow = Array.from(rewardContainer.children).find(function(row) {
+            var rewardRows = getRewardRows(rewardContainer).filter(function(row) {
                 var imgEl = row.querySelector('img.partner-thumbnail');
                 return imgEl && imgEl.alt === game.name;
             });
-            if (rewardRow) {
-                farmRewardCampaign(game, rewardRow, list, idx);
+            if (rewardRows.length > 0) {
+                farmRewardCampaign(game, rewardRows, 0, list, idx);
                 return;
             }
         }
