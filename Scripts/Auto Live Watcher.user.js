@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Live Watcher
 // @namespace    https://github.com/
-// @version      3.10.4
+// @version      3.10.5
 // @description  Watches YouTube or Twitch live streams automatically as they appear. Also picks up Twitch Drops automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -90,7 +90,7 @@ async function detectSite() {
         } else if (locationContains("?filter=drops&sort=VIEWER_COUNT")) {
             // Loop leads to 5 then back if disruption is found
             popupText("ALWU: 4 - Twitch Category Watcher detected");
-            const elm = await waitForElm(".directory-header-new__description");
+            const elm = await waitForElm(".directory-header-new__info");
 
             sessionStorage.removeItem("twitchAboutLocation");
 
