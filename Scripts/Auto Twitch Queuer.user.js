@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.13.0
+// @version      1.14.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -734,9 +734,10 @@ function injectDropButtons() {
         renderDropButtons(campaignContainer);
         renderClosedDropButtons();
         var closedObserver = new MutationObserver(function() {
-            if (renderClosedDropButtons()) closedObserver.disconnect();
+            if (renderClosedDropButtons()) { clearTimeout(closedObserverTimeout); closedObserver.disconnect(); }
         });
         closedObserver.observe(document.body, { childList: true, subtree: true });
+        var closedObserverTimeout = setTimeout(function() { closedObserver.disconnect(); }, 15000);
         if(sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") == "true" && window.location.pathname === "/drops/campaigns") {
             autoFarmCampaigns();
         }
@@ -846,12 +847,18 @@ function farmRewardCampaign(game, rewardRows, rowIdx, list, idx) {
     var detailObserver = new MutationObserver(function() {
         if (!rewardRow.querySelector('.drop-details__label')) return;
         clearTimeout(parseTimer);
+        clearTimeout(detailObserverTimeout);
         parseTimer = setTimeout(function() {
             detailObserver.disconnect();
             parseRewardAndQueue(game, rewardRow, rewardRows, rowIdx, list, idx);
         }, 500);
     });
     detailObserver.observe(rewardRow, { childList: true, subtree: true });
+    var detailObserverTimeout = setTimeout(function() {
+        clearTimeout(parseTimer);
+        detailObserver.disconnect();
+        farmRewardCampaign(game, rewardRows, rowIdx + 1, list, idx);
+    }, 10000);
     if (accordionBtn && accordionBtn.getAttribute('aria-expanded') !== 'true') {
         accordionBtn.click();
     }
@@ -1068,6 +1075,7 @@ function farmNextPriority(list, idx) {
         var detailObserver = new MutationObserver(function() {
             if(!r.querySelector('.drop-details__label')) return;
             clearTimeout(parseTimer);
+            clearTimeout(detailObserverTimeout);
             parseTimer = setTimeout(function() {
                 detailObserver.disconnect();
                 loadedCount++;
@@ -1077,6 +1085,14 @@ function farmNextPriority(list, idx) {
             }, 500);
         });
         detailObserver.observe(r, { childList: true, subtree: true });
+        var detailObserverTimeout = setTimeout(function() {
+            clearTimeout(parseTimer);
+            detailObserver.disconnect();
+            loadedCount++;
+            if(loadedCount >= toLoad.length) {
+                parseAllCampaignsAndQueue(game, matchingRows, list, idx);
+            }
+        }, 10000);
         if(!isExpanded && accordionBtn) {
             accordionBtn.click();
         }
