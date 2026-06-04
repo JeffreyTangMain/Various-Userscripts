@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.14.1
+// @version      1.15.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -79,21 +79,49 @@ function getCampaignsIframe() {
     return campaignsIframe;
 }
 
+function expandRowsSequentially(rowsToExpand, onDone) {
+    if (rowsToExpand.length === 0) { onDone(); return; }
+    var r = rowsToExpand[0];
+    var rest = rowsToExpand.slice(1);
+    if (r.querySelector('.drop-details__label')) {
+        expandRowsSequentially(rest, onDone);
+        return;
+    }
+    try { r.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch(e) {}
+    setTimeout(function() {
+        var accordionBtn = r.querySelector('button[aria-expanded]');
+        var parseTimer = null;
+        var detailObserver = new MutationObserver(function() {
+            if (!r.querySelector('.drop-details__label')) return;
+            clearTimeout(parseTimer);
+            clearTimeout(detailObserverTimeout);
+            parseTimer = setTimeout(function() {
+                detailObserver.disconnect();
+                expandRowsSequentially(rest, onDone);
+            }, 500);
+        });
+        detailObserver.observe(r, { childList: true, subtree: true });
+        var detailObserverTimeout = setTimeout(function() {
+            clearTimeout(parseTimer);
+            detailObserver.disconnect();
+            expandRowsSequentially(rest, onDone);
+        }, 10000);
+        if (accordionBtn && accordionBtn.getAttribute('aria-expanded') !== 'true') {
+            accordionBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        }
+    }, 500);
+}
+
 function checkForHigherPriorityCampaign() {
     return new Promise(function(resolve) {
         var farmingIdx = parseInt(sessionStorage.getItem("farmingGameIdx") || "-1");
-        popupText("Debug: Priority check — farmingIdx=" + farmingIdx);
+        popupText("Debug: Priority check - farmingIdx=" + farmingIdx);
         if (farmingIdx <= 0) { popupText("Debug: farmingIdx<=0, skipping priority check"); resolve(false); return; }
         var list = getDropList();
         var higherPriorityGames = list.slice(0, farmingIdx);
         var stalledGames = JSON.parse(sessionStorage.getItem("farmingStallGameNames") || "[]");
-        popupText("Debug: Stalled games: [" + stalledGames.join(", ") + "]");
-        popupText("Debug: Higher priority games (before stall filter): [" + higherPriorityGames.map(function(g){return g.name;}).join(", ") + "]");
-        var higherPriorityNames = higherPriorityGames
-            .filter(function(g) { return !stalledGames.includes(g.name); })
-            .map(function(g) { return g.name; });
-        popupText("Debug: Higher priority names (after stall filter): [" + higherPriorityNames.join(", ") + "]");
-        if (higherPriorityNames.length === 0) { popupText("Debug: All higher priority games are stalled, resolving false"); resolve(false); return; }
+        var higherPriorityNames = higherPriorityGames.map(function(g) { return g.name; });
+        popupText("Debug: Higher priority names: [" + higherPriorityNames.join(", ") + "] (stalled: [" + stalledGames.filter(function(g) { return higherPriorityNames.includes(g); }).join(", ") + "])");
         var iframe = getCampaignsIframe();
         function doCheck() {
             try {
@@ -115,58 +143,205 @@ function checkForHigherPriorityCampaign() {
                     }
                 }
                 popupText("Debug: Priority check scope=" + (dropSearchRoot === doc ? "full page" : "open drop campaigns only"));
-                var found = Array.from(dropSearchRoot.querySelectorAll('button[aria-expanded]')).some(function(btn) {
-                    var pEl = btn.querySelector('p');
-                    if (!pEl) return false;
-                    var gameName = pEl.textContent.trim();
-                    if (!higherPriorityNames.includes(gameName)) return false;
-                    var trackedCampaigns = tracker[gameName];
-                    var allCompleted = trackedCampaigns && trackedCampaigns.length > 0 && trackedCampaigns.every(function(c) { return c.completed; });
-                    if (!allCompleted) { triggeringGame = gameName; return true; }
-                    return false;
-                });
 
-                if (!found) {
-                    var rewardHeader = Array.from(doc.querySelectorAll('h4')).find(function(el) {
-                        return el.textContent.trim() === "Open Reward Campaigns";
-                    });
-                    if (rewardHeader) {
-                        var rewardContainer = null;
-                        var rel = rewardHeader;
-                        while (rel && rel !== doc.body) {
-                            var rsib = rel.nextElementSibling;
-                            while (rsib) {
-                                if (rsib.querySelector('button[aria-expanded]')) { rewardContainer = rsib; break; }
-                                rsib = rsib.nextElementSibling;
+                var allVisibleGames = Array.from(dropSearchRoot.children).map(function(row) {
+                    var pEl = row.querySelector('p');
+                    return pEl ? pEl.textContent.trim() : null;
+                }).filter(Boolean);
+                var rewardPriorityNames = [];
+                var rewardDebugHeader = Array.from(doc.querySelectorAll('h4')).find(function(el) { return el.textContent.trim() === "Open Reward Campaigns"; });
+                if (rewardDebugHeader) {
+                    var rdEl = rewardDebugHeader;
+                    while (rdEl && rdEl !== doc.body) {
+                        var rdSib = rdEl.nextElementSibling;
+                        while (rdSib) {
+                            if (rdSib.querySelector('button[aria-expanded]')) {
+                                Array.from(rdSib.querySelectorAll('img.partner-thumbnail')).forEach(function(img) {
+                                    if (img.alt) {
+                                        allVisibleGames.push(img.alt + " (reward)");
+                                        if (higherPriorityNames.includes(img.alt)) rewardPriorityNames.push(img.alt + " (reward)");
+                                    }
+                                });
+                                break;
                             }
-                            if (rewardContainer) break;
-                            rel = rel.parentElement;
+                            rdSib = rdSib.nextElementSibling;
                         }
-                        if (rewardContainer) {
-                            var seen = [];
-                            var rewardRows = Array.from(rewardContainer.querySelectorAll('.accordion-header')).map(function(h) {
-                                return h.parentElement;
-                            }).filter(function(row) {
-                                if (seen.indexOf(row) !== -1) return false;
-                                seen.push(row);
-                                return true;
+                        if (rdSib && rdSib.querySelector('button[aria-expanded]')) break;
+                        rdEl = rdEl.parentElement;
+                    }
+                }
+                popupText("Debug: Games visible in iframe (" + allVisibleGames.length + "): [" + allVisibleGames.join(", ") + "]");
+
+                var allPriorityDropRows = Array.from(dropSearchRoot.children).filter(function(row) {
+                    var pEl = row.querySelector('p');
+                    return pEl && higherPriorityNames.includes(pEl.textContent.trim());
+                });
+                var allPriorityLabels = allPriorityDropRows.filter(function(r) { return !r.querySelector('.drop-details__label'); }).map(function(r) { var p = r.querySelector('p'); return p ? p.textContent.trim() : '?'; }).concat(rewardPriorityNames);
+                popupText("Debug: Priority rows needing expansion (" + allPriorityLabels.length + "): [" + allPriorityLabels.join(", ") + "]");
+
+                function checkDropRowsSequentially(rows, rowIdx, onDone) {
+                    if (rowIdx >= rows.length) { onDone(false); return; }
+                    var row = rows[rowIdx];
+                    var pEl = row.querySelector('p');
+                    var gameName = pEl ? pEl.textContent.trim() : null;
+                    if (!gameName) { checkDropRowsSequentially(rows, rowIdx + 1, onDone); return; }
+                    function afterExpand() {
+                        var trackedCampaigns = tracker[gameName];
+                        var isStalled = stalledGames.includes(gameName);
+                        var pageCampaigns = parseCampaignsFromRow(row);
+                        if (isStalled) {
+                            var hasNew = pageCampaigns.some(function(c) {
+                                return !trackedCampaigns || !trackedCampaigns.find(function(t) { return t.name === c.name; });
                             });
-                            found = rewardRows.some(function(row) {
-                                var imgEl = row.querySelector('img.partner-thumbnail');
-                                if (!imgEl || !imgEl.alt) return false;
-                                var gameName = imgEl.alt;
-                                if (!higherPriorityNames.includes(gameName)) return false;
-                                var trackedCampaigns = tracker[gameName];
-                                var allCompleted = trackedCampaigns && trackedCampaigns.length > 0 && trackedCampaigns.every(function(c) { return c.completed; });
-                                if (!allCompleted) { triggeringGame = gameName; return true; }
-                                return false;
-                            });
+                            var stalledSummary = pageCampaigns.length > 0
+                                ? pageCampaigns.map(function(c) {
+                                    var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
+                                    return c.name + (t ? (t.completed ? " [done]" : " [stalled]") : " [NEW]");
+                                }).join(", ")
+                                : "no campaigns read";
+                            popupText("Debug: Checking stalled " + gameName + " - " + stalledSummary);
+                            if (hasNew) { triggeringGame = gameName; onDone(true); return; }
+                        } else {
+                            var allCompleted = trackedCampaigns && trackedCampaigns.length > 0 && trackedCampaigns.every(function(c) { return c.completed; });
+                            var pageSummary = pageCampaigns.length > 0
+                                ? pageCampaigns.map(function(c) {
+                                    var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
+                                    return c.name + (t ? (t.completed ? " [done]" : " [pending]") : " [untracked]");
+                                }).join(", ")
+                                : "not expanded";
+                            popupText("Debug: Checking " + gameName + " - " + pageSummary);
+                            if (!allCompleted) { triggeringGame = gameName; onDone(true); return; }
                         }
+                        checkDropRowsSequentially(rows, rowIdx + 1, onDone);
+                    }
+                    if (row.querySelector('.drop-details__label')) { afterExpand(); return; }
+                    try { row.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch(e) {}
+                    setTimeout(function() {
+                        var accordionBtn = row.querySelector('button[aria-expanded]');
+                        var parseTimer = null;
+                        var detailObserver = new MutationObserver(function() {
+                            if (!row.querySelector('.drop-details__label')) return;
+                            clearTimeout(parseTimer);
+                            clearTimeout(detailObserverTimeout);
+                            parseTimer = setTimeout(function() {
+                                detailObserver.disconnect();
+                                afterExpand();
+                            }, 500);
+                        });
+                        detailObserver.observe(row, { childList: true, subtree: true });
+                        var detailObserverTimeout = setTimeout(function() {
+                            clearTimeout(parseTimer);
+                            detailObserver.disconnect();
+                            afterExpand();
+                        }, 10000);
+                        if (accordionBtn && accordionBtn.getAttribute('aria-expanded') !== 'true') {
+                            accordionBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                        }
+                    }, 500);
+                }
+
+                var allPriorityRewardRows = [];
+                var rewardContainerForCheck = null;
+                var rewardHeaderForCheck = Array.from(doc.querySelectorAll('h4')).find(function(el) {
+                    return el.textContent.trim() === "Open Reward Campaigns";
+                });
+                if (rewardHeaderForCheck) {
+                    var rfcEl = rewardHeaderForCheck;
+                    while (rfcEl && rfcEl !== doc.body) {
+                        var rfcSib = rfcEl.nextElementSibling;
+                        while (rfcSib) {
+                            if (rfcSib.querySelector('button[aria-expanded]')) { rewardContainerForCheck = rfcSib; break; }
+                            rfcSib = rfcSib.nextElementSibling;
+                        }
+                        if (rewardContainerForCheck) break;
+                        rfcEl = rfcEl.parentElement;
+                    }
+                    if (rewardContainerForCheck) {
+                        var seenRew = [];
+                        allPriorityRewardRows = Array.from(rewardContainerForCheck.querySelectorAll('.accordion-header')).map(function(h) {
+                            return h.parentElement;
+                        }).filter(function(row) {
+                            if (seenRew.indexOf(row) !== -1) return false;
+                            seenRew.push(row);
+                            var imgEl = row.querySelector('img.partner-thumbnail');
+                            return imgEl && imgEl.alt && higherPriorityNames.includes(imgEl.alt);
+                        });
                     }
                 }
 
-                popupText("Debug: Priority check result=" + found + (triggeringGame ? " triggered by: " + triggeringGame : ""));
-                resolve(found);
+                function checkRewardRowsSequentially(rows, rowIdx, onDone) {
+                    if (rowIdx >= rows.length) { onDone(false); return; }
+                    var row = rows[rowIdx];
+                    var imgEl = row.querySelector('img.partner-thumbnail');
+                    if (!imgEl || !imgEl.alt) { checkRewardRowsSequentially(rows, rowIdx + 1, onDone); return; }
+                    var gameName = imgEl.alt;
+                    function afterExpand() {
+                        var trackedCampaigns = tracker[gameName];
+                        var rewardNames = [];
+                        row.querySelectorAll('.drop-benefit__image-container img').forEach(function(img) {
+                            if (img.alt) rewardNames.push(img.alt);
+                        });
+                        if (rewardNames.length === 0) {
+                            var rewardsLabel = Array.from(row.querySelectorAll('.drop-details__label')).find(function(l) {
+                                return l.textContent.trim() === 'Rewards';
+                            });
+                            if (rewardsLabel) {
+                                rewardsLabel.parentElement.querySelectorAll('p').forEach(function(p) {
+                                    var t = p.textContent.trim();
+                                    if (t) rewardNames.push(t);
+                                });
+                            }
+                        }
+                        var pageCampaigns = rewardNames.length > 0 ? rewardNames.map(function(n) { return { name: n }; }) : [{ name: gameName + " Reward" }];
+                        var allCompleted = trackedCampaigns && trackedCampaigns.length > 0 && pageCampaigns.every(function(c) {
+                            var t = trackedCampaigns.find(function(t) { return t.name === c.name; });
+                            return t && t.completed;
+                        });
+                        var pageSummary = pageCampaigns.map(function(c) {
+                            var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
+                            return c.name + (t ? (t.completed ? " [done]" : " [pending]") : " [untracked]");
+                        }).join(", ");
+                        popupText("Debug: Checking reward " + gameName + " - " + pageSummary);
+                        if (!allCompleted) { triggeringGame = gameName; onDone(true); return; }
+                        checkRewardRowsSequentially(rows, rowIdx + 1, onDone);
+                    }
+                    if (row.querySelector('.drop-details__label')) { afterExpand(); return; }
+                    try { row.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch(e) {}
+                    setTimeout(function() {
+                        var accordionBtn = row.querySelector('button[aria-expanded]');
+                        var parseTimer = null;
+                        var detailObserver = new MutationObserver(function() {
+                            if (!row.querySelector('.drop-details__label')) return;
+                            clearTimeout(parseTimer);
+                            clearTimeout(detailObserverTimeout);
+                            parseTimer = setTimeout(function() {
+                                detailObserver.disconnect();
+                                afterExpand();
+                            }, 500);
+                        });
+                        detailObserver.observe(row, { childList: true, subtree: true });
+                        var detailObserverTimeout = setTimeout(function() {
+                            clearTimeout(parseTimer);
+                            detailObserver.disconnect();
+                            afterExpand();
+                        }, 10000);
+                        if (accordionBtn && accordionBtn.getAttribute('aria-expanded') !== 'true') {
+                            accordionBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                        }
+                    }, 500);
+                }
+
+                checkDropRowsSequentially(allPriorityDropRows, 0, function(dropFound) {
+                    if (dropFound) {
+                        popupText("Debug: Priority check result=true" + (triggeringGame ? " triggered by: " + triggeringGame : ""));
+                        resolve(true);
+                        return;
+                    }
+                    checkRewardRowsSequentially(allPriorityRewardRows, 0, function(rewardFound) {
+                        popupText("Debug: Priority check result=" + rewardFound + (triggeringGame ? " triggered by: " + triggeringGame : ""));
+                        resolve(rewardFound);
+                    });
+                });
             } catch(e) {
                 resolve(false);
             }
@@ -621,7 +796,7 @@ function openCampaignManager() {
                 item.className = 'atq-item';
                 var lbl = document.createElement('span');
                 lbl.className = 'atq-item-label' + (campaign.completed ? ' done' : '');
-                lbl.textContent = campaign.name + '  —  ends ' + campaign.endDate;
+                lbl.textContent = campaign.name + '  -  ends ' + campaign.endDate;
                 item.appendChild(mkBtn(campaign.completed ? 'Unmark' : 'Mark Done', function() {
                     campaign.completed = !campaign.completed;
                     popupText((campaign.completed ? 'Completed: ' : 'Unmarked: ') + campaign.name);
@@ -986,15 +1161,9 @@ function autoFarmCampaigns() {
         return;
     }
     var stallSameGame = sessionStorage.getItem("farmingStallSameGame");
-    var stallNextIdx = sessionStorage.getItem("farmingStallNextIdx");
     if (stallSameGame !== null) {
         sessionStorage.removeItem("farmingStallSameGame");
         farmNextPriority(list, parseInt(stallSameGame));
-    } else if (stallNextIdx !== null) {
-        sessionStorage.removeItem("farmingStallNextIdx");
-        sessionStorage.removeItem("farmingSkipCampaigns");
-        sessionStorage.setItem("farmingIsStallFallback", "true");
-        farmNextPriority(list, parseInt(stallNextIdx));
     } else {
         sessionStorage.removeItem("farmingIsStallFallback");
         sessionStorage.removeItem("farmingSkipCampaigns");
@@ -1039,6 +1208,7 @@ function farmNextPriority(list, idx) {
         var nameEl = row.querySelector('p');
         return nameEl && nameEl.textContent.trim() === game.name;
     });
+    popupText("Debug: Found " + matchingRows.length + " row(s) for " + game.name + " in campaign list");
     if(matchingRows.length === 0) {
         popupText("Campaign not found on page: " + game.name);
         farmNextPriority(list, idx + 1);
@@ -1051,40 +1221,14 @@ function farmNextPriority(list, idx) {
         parseAllCampaignsAndQueue(game, matchingRows, list, idx);
         return;
     }
-    var loadedCount = 0;
-    toLoad.forEach(function(r) {
-        var parseTimer = null;
-        var accordionBtn = r.querySelector('button');
-        var isExpanded = accordionBtn && accordionBtn.getAttribute('aria-expanded') === 'true';
-        var detailObserver = new MutationObserver(function() {
-            if(!r.querySelector('.drop-details__label')) return;
-            clearTimeout(parseTimer);
-            clearTimeout(detailObserverTimeout);
-            parseTimer = setTimeout(function() {
-                detailObserver.disconnect();
-                loadedCount++;
-                if(loadedCount >= toLoad.length) {
-                    parseAllCampaignsAndQueue(game, matchingRows, list, idx);
-                }
-            }, 500);
-        });
-        detailObserver.observe(r, { childList: true, subtree: true });
-        var detailObserverTimeout = setTimeout(function() {
-            clearTimeout(parseTimer);
-            detailObserver.disconnect();
-            loadedCount++;
-            if(loadedCount >= toLoad.length) {
-                parseAllCampaignsAndQueue(game, matchingRows, list, idx);
-            }
-        }, 10000);
-        if(!isExpanded && accordionBtn) {
-            accordionBtn.click();
-        }
+    expandRowsSequentially(toLoad, function() {
+        parseAllCampaignsAndQueue(game, matchingRows, list, idx);
     });
 }
 
 function parseAllCampaignsAndQueue(game, matchingRows, list, idx) {
     var campaigns = parseCampaignsFromRow(matchingRows);
+    popupText("Debug: Parsed " + campaigns.length + " campaign(s) for " + game.name + ": [" + campaigns.map(function(c) { return c.name; }).join(", ") + "]");
     if (campaigns.length === 0) {
         popupText("No campaigns found for: " + game.name + ", skipping");
         farmNextPriority(list, idx + 1);
@@ -1098,6 +1242,7 @@ function parseAllCampaignsAndQueue(game, matchingRows, list, idx) {
         var tracked = tracker[game.name] && tracker[game.name].find(function(t) { return t.name === c.name; });
         return !tracked || !tracked.completed;
     });
+    popupText("Debug: " + uncompleted.length + " uncompleted: [" + uncompleted.map(function(c) { return c.name; }).join(", ") + "]");
     if (uncompleted.length === 0) {
         popupText("All campaigns completed for: " + game.name + ", moving to next");
         sessionStorage.removeItem("farmingSkipCampaigns");
@@ -1106,15 +1251,15 @@ function parseAllCampaignsAndQueue(game, matchingRows, list, idx) {
     }
     var skipList = JSON.parse(sessionStorage.getItem("farmingSkipCampaigns") || "[]");
     var farmable = uncompleted.filter(function(c) { return !skipList.includes(c.name); });
+    popupText("Debug: " + farmable.length + " farmable (skip list: [" + skipList.join(", ") + "]): [" + farmable.map(function(c) { return c.name; }).join(", ") + "]");
     if (farmable.length === 0) {
         sessionStorage.removeItem("farmingSkipCampaigns");
-        sessionStorage.setItem("farmingStallNextIdx", String(idx + 1));
         sessionStorage.setItem("farmingIsStallFallback", "true");
         var stalledGames = JSON.parse(sessionStorage.getItem("farmingStallGameNames") || "[]");
         if (!stalledGames.includes(game.name)) stalledGames.push(game.name);
         sessionStorage.setItem("farmingStallGameNames", JSON.stringify(stalledGames));
-        popupText("All campaign links stalled for " + game.name + ". Trying lower priority game");
-        window.location.assign("https://www.twitch.tv/drops/campaigns");
+        popupText("All campaign links stalled for " + game.name + ". Trying next priority game");
+        farmNextPriority(list, idx + 1);
         return;
     }
     findNextFarmableCampaign(game, matchingRows, list, idx, farmable);
@@ -1457,7 +1602,7 @@ function startInventoryChecking() {
     var gameName = sessionStorage.getItem("farmingGameName");
     var campaignName = sessionStorage.getItem("farmingCampaignName");
     if (!gameName || !campaignName) return;
-    popupText("Starting checks — offline: " + offlineCheckMinutes + " min, inventory: " + checkIntervalMinutes + " min");
+    popupText("Starting checks - offline: " + offlineCheckMinutes + " min, inventory: " + checkIntervalMinutes + " min");
 
     function offlineTick() {
         runOfflineCheck();
