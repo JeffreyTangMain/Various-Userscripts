@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.16.0
+// @version      1.16.1
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -22,6 +22,7 @@ if (debug) {
     GM_registerMenuCommand("Debug: Run Inventory Check", runInventoryCheck);
     GM_registerMenuCommand("Debug: Run Offline Check", runOfflineCheck);
     GM_registerMenuCommand("Debug: Run Priority Check", runPriorityCheck);
+    GM_registerMenuCommand("Debug: Cull Iframes", debugCullIframes);
 }
 
 var currentDate = new Date();
@@ -71,37 +72,49 @@ function createHiddenIframe(src) {
 function killIframes() {
     clearTimeout(iframeKillTimeout);
     iframeKillTimeout = null;
+    var killed = [];
     if (inventoryIframe && inventoryIframe.parentNode) {
         inventoryIframe.parentNode.removeChild(inventoryIframe);
         inventoryIframe = null;
+        killed.push("inventory");
     }
     if (campaignsIframe && campaignsIframe.parentNode) {
         campaignsIframe.parentNode.removeChild(campaignsIframe);
         campaignsIframe = null;
+        killed.push("campaigns");
     }
+    if (killed.length > 0) popupText("Debug: Killed iframes: " + killed.join(", "));
+    else popupText("Debug: killIframes called but nothing to remove");
 }
 
 function scheduleIframeKill() {
     clearTimeout(iframeKillTimeout);
     var minutes = getDropSettings().fallbackMinutes || 30;
     iframeKillTimeout = setTimeout(killIframes, minutes * 60000);
+    popupText("Debug: Iframe kill scheduled in " + minutes + " min");
 }
 
 function getInventoryIframe() {
-    if (!inventoryIframe || !inventoryIframe.parentNode)
+    if (!inventoryIframe || !inventoryIframe.parentNode) {
         inventoryIframe = createHiddenIframe('https://www.twitch.tv/drops/inventory');
+        popupText("Debug: Created inventoryIframe");
+    } else {
+        popupText("Debug: Reusing inventoryIframe");
+    }
     scheduleIframeKill();
     return inventoryIframe;
 }
 
 function getCampaignsIframe() {
-    if (!campaignsIframe || !campaignsIframe.parentNode)
+    if (!campaignsIframe || !campaignsIframe.parentNode) {
         campaignsIframe = createHiddenIframe('https://www.twitch.tv/drops/campaigns');
+        popupText("Debug: Created campaignsIframe");
+    } else {
+        popupText("Debug: Reusing campaignsIframe");
+    }
     scheduleIframeKill();
     return campaignsIframe;
 }
-
-window.addEventListener('beforeunload', killIframes);
 
 function expandRowsSequentially(rowsToExpand, onDone) {
     if (rowsToExpand.length === 0) { onDone(); return; }
@@ -147,6 +160,7 @@ function checkForHigherPriorityCampaign() {
         var higherPriorityNames = higherPriorityGames.map(function(g) { return g.name; });
         popupText("Debug: Higher priority names: [" + higherPriorityNames.join(", ") + "] (stalled: [" + stalledGames.filter(function(g) { return higherPriorityNames.includes(g); }).join(", ") + "])");
         var iframe = getCampaignsIframe();
+        function done(result) { killIframes(); resolve(result); }
         function doCheck() {
             try {
                 var doc = iframe.contentDocument || iframe.contentWindow.document;
@@ -358,20 +372,20 @@ function checkForHigherPriorityCampaign() {
                 checkDropRowsSequentially(allPriorityDropRows, 0, function(dropFound) {
                     if (dropFound) {
                         popupText("Debug: Priority check result=true" + (triggeringGame ? " triggered by: " + triggeringGame : ""));
-                        resolve(true);
+                        done(true);
                         return;
                     }
                     checkRewardRowsSequentially(allPriorityRewardRows, 0, function(rewardFound) {
                         popupText("Debug: Priority check result=" + rewardFound + (triggeringGame ? " triggered by: " + triggeringGame : ""));
-                        resolve(rewardFound);
+                        done(rewardFound);
                     });
                 });
             } catch(e) {
-                resolve(false);
+                done(false);
             }
         }
         var timeout = setTimeout(function() {
-            resolve(false);
+            done(false);
         }, 20000);
         iframe.onload = function() {
             clearTimeout(timeout);
@@ -384,16 +398,17 @@ function checkForHigherPriorityCampaign() {
 function checkInventoryForCampaign(campaignName, endDate) {
     return new Promise(function(resolve) {
         var iframe = getInventoryIframe();
+        function done(result) { killIframes(); resolve(result); }
         function doCheck() {
             try {
                 var doc = iframe.contentDocument || iframe.contentWindow.document;
                 if (!doc || !doc.body) {
-                    resolve({ exists: true, progress: null });
+                    done({ exists: true, progress: null });
                     return;
                 }
                 var inventoryItems = doc.querySelectorAll('.inventory-campaign-info');
                 if (inventoryItems.length === 0) {
-                    resolve({ exists: true, progress: null });
+                    done({ exists: true, progress: null });
                     return;
                 }
                 var found = false;
@@ -412,13 +427,13 @@ function checkInventoryForCampaign(campaignName, endDate) {
                 });
                 var progress = progressValues.length > 0 ? progressValues.join(",") : null;
                 popupText("Current Progress: " + progress);
-                resolve({ exists: found, progress: progress });
+                done({ exists: found, progress: progress });
             } catch(e) {
-                resolve({ exists: true, progress: null });
+                done({ exists: true, progress: null });
             }
         }
         var timeout = setTimeout(function() {
-            resolve({ exists: true, progress: null });
+            done({ exists: true, progress: null });
         }, 20000);
         iframe.onload = function() {
             clearTimeout(timeout);
@@ -1558,6 +1573,13 @@ function runPriorityCheck() {
             popupText("Debug: No higher priority campaigns found");
         }
     });
+}
+
+function debugCullIframes() {
+    var invStatus = inventoryIframe ? (inventoryIframe.parentNode ? "alive" : "detached") : "null";
+    var campStatus = campaignsIframe ? (campaignsIframe.parentNode ? "alive" : "detached") : "null";
+    popupText("Iframe status: inv=" + invStatus + " camp=" + campStatus);
+    killIframes();
 }
 
 function runInventoryCheck() {
