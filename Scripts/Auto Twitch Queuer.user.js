@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.15.0
+// @version      1.16.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -33,6 +33,7 @@ var inventoryCheckInterval;
 var offlineCheckInterval;
 var inventoryIframe = null;
 var campaignsIframe = null;
+var iframeKillTimeout = null;
 var streamViewerCountSeen = false;
 
 var sessionStorageNull = sessionStorage.getItem('scheduleStorage') == null;
@@ -67,17 +68,40 @@ function createHiddenIframe(src) {
     return f;
 }
 
+function killIframes() {
+    clearTimeout(iframeKillTimeout);
+    iframeKillTimeout = null;
+    if (inventoryIframe && inventoryIframe.parentNode) {
+        inventoryIframe.parentNode.removeChild(inventoryIframe);
+        inventoryIframe = null;
+    }
+    if (campaignsIframe && campaignsIframe.parentNode) {
+        campaignsIframe.parentNode.removeChild(campaignsIframe);
+        campaignsIframe = null;
+    }
+}
+
+function scheduleIframeKill() {
+    clearTimeout(iframeKillTimeout);
+    var minutes = getDropSettings().fallbackMinutes || 30;
+    iframeKillTimeout = setTimeout(killIframes, minutes * 60000);
+}
+
 function getInventoryIframe() {
-    if (inventoryIframe && inventoryIframe.parentNode) return inventoryIframe;
-    inventoryIframe = createHiddenIframe('https://www.twitch.tv/drops/inventory');
+    if (!inventoryIframe || !inventoryIframe.parentNode)
+        inventoryIframe = createHiddenIframe('https://www.twitch.tv/drops/inventory');
+    scheduleIframeKill();
     return inventoryIframe;
 }
 
 function getCampaignsIframe() {
-    if (campaignsIframe && campaignsIframe.parentNode) return campaignsIframe;
-    campaignsIframe = createHiddenIframe('https://www.twitch.tv/drops/campaigns');
+    if (!campaignsIframe || !campaignsIframe.parentNode)
+        campaignsIframe = createHiddenIframe('https://www.twitch.tv/drops/campaigns');
+    scheduleIframeKill();
     return campaignsIframe;
 }
+
+window.addEventListener('beforeunload', killIframes);
 
 function expandRowsSequentially(rowsToExpand, onDone) {
     if (rowsToExpand.length === 0) { onDone(); return; }
@@ -1813,14 +1837,7 @@ function gotoNextWebsite() {
 function cancelQueue() {
     clearTimeout(scheduleTimeout);
     stopInventoryChecking();
-    if (inventoryIframe && inventoryIframe.parentNode) {
-        inventoryIframe.parentNode.removeChild(inventoryIframe);
-        inventoryIframe = null;
-    }
-    if (campaignsIframe && campaignsIframe.parentNode) {
-        campaignsIframe.parentNode.removeChild(campaignsIframe);
-        campaignsIframe = null;
-    }
+    killIframes();
     document.getElementById("TwitchScheduleOuterWrapper")?.remove();
     sessionStorage.removeItem("scheduleStorage");
     clearFarmingSessionState();
