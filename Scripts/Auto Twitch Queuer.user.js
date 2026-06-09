@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.16.1
+// @version      1.16.2
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -25,6 +25,11 @@ if (debug) {
     GM_registerMenuCommand("Debug: Cull Iframes", debugCullIframes);
 }
 
+window.addEventListener('pagehide', function() {
+    stopInventoryChecking();
+    killIframes();
+});
+
 var currentDate = new Date();
 var currentDateString = currentDate.toLocaleDateString("en-CA");
 var scheduleList = [];
@@ -35,6 +40,7 @@ var offlineCheckInterval;
 var inventoryIframe = null;
 var campaignsIframe = null;
 var iframeKillTimeout = null;
+var iframeCheckGen = 0;
 var streamViewerCountSeen = false;
 
 var sessionStorageNull = sessionStorage.getItem('scheduleStorage') == null;
@@ -69,17 +75,34 @@ function createHiddenIframe(src) {
     return f;
 }
 
+function teardownIframe(frame) {
+    frame.onload = null;
+    frame.onerror = null;
+    try {
+        if (frame.contentWindow) {
+            frame.contentWindow.location.replace('about:blank');
+        }
+    } catch (e) {}
+    try {
+        frame.src = 'about:blank';
+    } catch (e) {}
+    if (frame.parentNode) {
+        frame.parentNode.removeChild(frame);
+    }
+}
+
 function killIframes() {
     clearTimeout(iframeKillTimeout);
     iframeKillTimeout = null;
+    iframeCheckGen++;
     var killed = [];
-    if (inventoryIframe && inventoryIframe.parentNode) {
-        inventoryIframe.parentNode.removeChild(inventoryIframe);
+    if (inventoryIframe) {
+        teardownIframe(inventoryIframe);
         inventoryIframe = null;
         killed.push("inventory");
     }
-    if (campaignsIframe && campaignsIframe.parentNode) {
-        campaignsIframe.parentNode.removeChild(campaignsIframe);
+    if (campaignsIframe) {
+        teardownIframe(campaignsIframe);
         campaignsIframe = null;
         killed.push("campaigns");
     }
@@ -159,9 +182,12 @@ function checkForHigherPriorityCampaign() {
         var stalledGames = JSON.parse(sessionStorage.getItem("farmingStallGameNames") || "[]");
         var higherPriorityNames = higherPriorityGames.map(function(g) { return g.name; });
         popupText("Debug: Higher priority names: [" + higherPriorityNames.join(", ") + "] (stalled: [" + stalledGames.filter(function(g) { return higherPriorityNames.includes(g); }).join(", ") + "])");
+        var myGen = iframeCheckGen;
+        function aborted() { return myGen !== iframeCheckGen; }
         var iframe = getCampaignsIframe();
         function done(result) { killIframes(); resolve(result); }
         function doCheck() {
+            if (aborted()) { return; }
             try {
                 var doc = iframe.contentDocument || iframe.contentWindow.document;
                 if (!doc || !doc.body) { resolve(false); return; }
@@ -218,12 +244,14 @@ function checkForHigherPriorityCampaign() {
                 popupText("Debug: Priority rows needing expansion (" + allPriorityLabels.length + "): [" + allPriorityLabels.join(", ") + "]");
 
                 function checkDropRowsSequentially(rows, rowIdx, onDone) {
+                    if (aborted()) { return; }
                     if (rowIdx >= rows.length) { onDone(false); return; }
                     var row = rows[rowIdx];
                     var pEl = row.querySelector('p');
                     var gameName = pEl ? pEl.textContent.trim() : null;
                     if (!gameName) { checkDropRowsSequentially(rows, rowIdx + 1, onDone); return; }
                     function afterExpand() {
+                        if (aborted()) { return; }
                         var trackedCampaigns = tracker[gameName];
                         var isStalled = stalledGames.includes(gameName);
                         var pageCampaigns = parseCampaignsFromRow(row);
@@ -308,12 +336,14 @@ function checkForHigherPriorityCampaign() {
                 }
 
                 function checkRewardRowsSequentially(rows, rowIdx, onDone) {
+                    if (aborted()) { return; }
                     if (rowIdx >= rows.length) { onDone(false); return; }
                     var row = rows[rowIdx];
                     var imgEl = row.querySelector('img.partner-thumbnail');
                     if (!imgEl || !imgEl.alt) { checkRewardRowsSequentially(rows, rowIdx + 1, onDone); return; }
                     var gameName = imgEl.alt;
                     function afterExpand() {
+                        if (aborted()) { return; }
                         var trackedCampaigns = tracker[gameName];
                         var rewardNames = [];
                         row.querySelectorAll('.drop-benefit__image-container img').forEach(function(img) {
@@ -397,9 +427,12 @@ function checkForHigherPriorityCampaign() {
 
 function checkInventoryForCampaign(campaignName, endDate) {
     return new Promise(function(resolve) {
+        var myGen = iframeCheckGen;
+        function aborted() { return myGen !== iframeCheckGen; }
         var iframe = getInventoryIframe();
         function done(result) { killIframes(); resolve(result); }
         function doCheck() {
+            if (aborted()) { return; }
             try {
                 var doc = iframe.contentDocument || iframe.contentWindow.document;
                 if (!doc || !doc.body) {
