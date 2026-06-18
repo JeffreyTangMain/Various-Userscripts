@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.16.2
+// @version      1.16.3
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -460,7 +460,7 @@ function checkInventoryForCampaign(campaignName, endDate) {
                 });
                 var progress = progressValues.length > 0 ? progressValues.join(",") : null;
                 popupText("Current Progress: " + progress);
-                done({ exists: found, progress: progress });
+                done({ exists: found, progress: progress, found: found });
             } catch(e) {
                 done({ exists: true, progress: null });
             }
@@ -1473,6 +1473,7 @@ function clearFarmingSessionState() {
     sessionStorage.removeItem("farmingAllLinks");
     sessionStorage.removeItem("farmingLinkIndex");
     sessionStorage.removeItem("farmingLastProgress");
+    sessionStorage.removeItem("farmingSeenInInventory");
     sessionStorage.removeItem("farmingIsStallFallback");
     sessionStorage.removeItem("farmingStallNextIdx");
     sessionStorage.removeItem("farmingSkipCampaigns");
@@ -1641,7 +1642,22 @@ function runInventoryCheck() {
         return;
     }
     checkInventoryForCampaign(campaignName, campaign.endDate).then(function(result) {
+        var seenCampaign = sessionStorage.getItem("farmingSeenInInventory");
+        if (result.found) {
+            sessionStorage.setItem("farmingSeenInInventory", campaignName);
+        }
         if (!result.exists) {
+            if (seenCampaign !== campaignName) {
+                popupText("Debug: " + campaignName + " not yet in inventory (no progress registered), continuing to watch");
+                checkForHigherPriorityCampaign().then(function(higherFound) {
+                    if (higherFound) {
+                        stopInventoryChecking();
+                        popupText("Higher priority campaign available. Returning to campaigns");
+                        window.location.assign("https://www.twitch.tv/drops/campaigns");
+                    }
+                });
+                return;
+            }
             markCampaignCompleted(gameName, campaignName, true);
             stopInventoryChecking();
             popupText("Campaign completed: " + campaignName + ". Returning to campaigns");
