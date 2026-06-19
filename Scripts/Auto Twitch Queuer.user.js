@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.16.3
+// @version      1.16.4
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -42,6 +42,7 @@ var campaignsIframe = null;
 var iframeKillTimeout = null;
 var iframeCheckGen = 0;
 var streamViewerCountSeen = false;
+var NO_PROGRESS_CHECK_LIMIT = 2;
 
 var sessionStorageNull = sessionStorage.getItem('scheduleStorage') == null;
 
@@ -1474,6 +1475,7 @@ function clearFarmingSessionState() {
     sessionStorage.removeItem("farmingLinkIndex");
     sessionStorage.removeItem("farmingLastProgress");
     sessionStorage.removeItem("farmingSeenInInventory");
+    sessionStorage.removeItem("farmingNoProgressChecks");
     sessionStorage.removeItem("farmingIsStallFallback");
     sessionStorage.removeItem("farmingStallNextIdx");
     sessionStorage.removeItem("farmingSkipCampaigns");
@@ -1646,51 +1648,66 @@ function runInventoryCheck() {
         if (result.found) {
             sessionStorage.setItem("farmingSeenInInventory", campaignName);
         }
-        if (!result.exists) {
-            if (seenCampaign !== campaignName) {
-                popupText("Debug: " + campaignName + " not yet in inventory (no progress registered), continuing to watch");
-                checkForHigherPriorityCampaign().then(function(higherFound) {
-                    if (higherFound) {
-                        stopInventoryChecking();
-                        popupText("Higher priority campaign available. Returning to campaigns");
-                        window.location.assign("https://www.twitch.tv/drops/campaigns");
-                    }
-                });
+
+        if (seenCampaign !== campaignName && !result.found) {
+            var missCount = parseInt(sessionStorage.getItem("farmingNoProgressChecks") || "0") + 1;
+            if (missCount >= NO_PROGRESS_CHECK_LIMIT) {
+                sessionStorage.removeItem("farmingNoProgressChecks");
+                stopInventoryChecking();
+                popupText(campaignName + " never registered in inventory. Treating as stalled, trying next link");
+                tryNextAvailableLink(gameName, campaignName);
                 return;
             }
-            markCampaignCompleted(gameName, campaignName, true);
-            stopInventoryChecking();
-            popupText("Campaign completed: " + campaignName + ". Returning to campaigns");
-            window.location.assign("https://www.twitch.tv/drops/campaigns");
-        } else {
+            sessionStorage.setItem("farmingNoProgressChecks", String(missCount));
+            popupText("Debug: " + campaignName + " not yet in inventory (" + missCount + "/" + NO_PROGRESS_CHECK_LIMIT + "), continuing to watch");
             checkForHigherPriorityCampaign().then(function(higherFound) {
                 if (higherFound) {
                     stopInventoryChecking();
                     popupText("Higher priority campaign available. Returning to campaigns");
                     window.location.assign("https://www.twitch.tv/drops/campaigns");
-                } else {
-                    var currentProgress = result.progress;
-                    var lastProgress = sessionStorage.getItem("farmingLastProgress");
-                    if (currentProgress !== null) {
-                        sessionStorage.setItem("farmingLastProgress", currentProgress);
-                        if (lastProgress !== null && currentProgress === lastProgress) {
-                            var storedLinks = JSON.parse(sessionStorage.getItem("farmingAllLinks") || "[]");
-                            var isCategory = storedLinks.length > 0 && storedLinks[storedLinks.length - 1].includes("/directory/category");
-                            if (!isCategory) {
-                                stopInventoryChecking();
-                                tryNextAvailableLink(gameName, campaignName);
-                            }
+                }
+            });
+            return;
+        }
+
+        sessionStorage.removeItem("farmingNoProgressChecks");
+
+        if (!result.exists) {
+            markCampaignCompleted(gameName, campaignName, true);
+            stopInventoryChecking();
+            popupText("Campaign completed: " + campaignName + ". Returning to campaigns");
+            window.location.assign("https://www.twitch.tv/drops/campaigns");
+            return;
+        }
+
+        checkForHigherPriorityCampaign().then(function(higherFound) {
+            if (higherFound) {
+                stopInventoryChecking();
+                popupText("Higher priority campaign available. Returning to campaigns");
+                window.location.assign("https://www.twitch.tv/drops/campaigns");
+            } else {
+                var currentProgress = result.progress;
+                var lastProgress = sessionStorage.getItem("farmingLastProgress");
+                if (currentProgress !== null) {
+                    sessionStorage.setItem("farmingLastProgress", currentProgress);
+                    if (lastProgress !== null && currentProgress === lastProgress) {
+                        var storedLinks = JSON.parse(sessionStorage.getItem("farmingAllLinks") || "[]");
+                        var isCategory = storedLinks.length > 0 && storedLinks[storedLinks.length - 1].includes("/directory/category");
+                        if (!isCategory) {
+                            stopInventoryChecking();
+                            tryNextAvailableLink(gameName, campaignName);
                         }
                     }
                 }
-            });
-        }
+            }
+        });
     });
 }
 
 function startInventoryChecking() {
     stopInventoryChecking();
     streamViewerCountSeen = false;
+    sessionStorage.removeItem("farmingNoProgressChecks");
     var settings = getDropSettings();
     var checkIntervalMinutes = settings.checkIntervalMinutes || 10;
     var offlineCheckMinutes = settings.offlineCheckMinutes || 1;
@@ -1890,7 +1907,9 @@ function processSchedule() {
         var hours = timeDiff / 1000 / 60 / 60;
         hours = Math.round(hours * 100) / 100;
         popupText("Next in Queue: " + scheduleList[0] + " in ~" + hours + " hours");
-        scheduleTimeout = setTimeout(processSchedule, timeDiff + 100);
+        var MAX_TIMEOUT_DELAY = 2147483647;
+        var nextDelay = Math.min(timeDiff + 100, MAX_TIMEOUT_DELAY);
+        scheduleTimeout = setTimeout(processSchedule, nextDelay);
     } else {
         gotoNextWebsite();
     }
