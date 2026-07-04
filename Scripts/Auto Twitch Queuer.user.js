@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      2.0.0
+// @version      2.0.1
 // @description  Queue a list of streams to open at specific times with automatic campaign farming. Also watch streams automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -463,7 +463,12 @@ function checkInventoryForCampaign(campaignName, endDate) {
                 }
                 var inventoryItems = doc.querySelectorAll('.inventory-campaign-info');
                 if (inventoryItems.length === 0) {
-                    done({ exists: true, progress: null });
+                    // No in-progress campaigns can mean two things: the page hasn't loaded yet,
+                    // or the last campaign just completed and the In Progress section is gone.
+                    // If the page shell and the Claimed section's drops are rendered, the
+                    // inventory genuinely loaded empty, so the campaign no longer exists.
+                    var pageLoaded = doc.querySelector('.inventory-page') && doc.querySelector('.inventory-drop-image');
+                    done({ exists: !pageLoaded, progress: null, found: false });
                     return;
                 }
                 var found = false;
@@ -538,34 +543,6 @@ function markCampaignCompleted(gameName, campaignName, completed) {
             setDropsTracker(tracker);
         }
     }
-}
-
-function deleteCampaignFromTracker(gameName, campaignName) {
-    var tracker = getDropsTracker();
-    if (tracker[gameName]) {
-        tracker[gameName] = tracker[gameName].filter(c => c.name !== campaignName);
-        if (tracker[gameName].length === 0) {
-            delete tracker[gameName];
-        }
-        setDropsTracker(tracker);
-    }
-}
-
-function deleteAllFromTracker() {
-    GM_setValue('dropsTracker', {});
-}
-
-function deleteExpiredFromTracker() {
-    var tracker = getDropsTracker();
-    Object.keys(tracker).forEach(function(gameName) {
-        tracker[gameName] = tracker[gameName].filter(function(campaign) {
-            return calculateTimeRemaining(campaign.endDate) >= -60;
-        });
-        if (tracker[gameName].length === 0) {
-            delete tracker[gameName];
-        }
-    });
-    setDropsTracker(tracker);
 }
 
 function areAllCampaignsCompleted(gameName) {
@@ -1216,6 +1193,7 @@ function parseRewardAndQueue(game, rewardRow, rewardRows, rowIdx, list, idx) {
     sessionStorage.removeItem("farmingLastProgress");
     sessionStorage.removeItem("farmingStalledChecks");
     sessionStorage.removeItem("farmingNoProgressChecks");
+    sessionStorage.removeItem("farmingMissingChecks");
     queueStreamFor(streamUrl, finalMinutes);
     sessionStorage.setItem("farmingGameIdx", idx.toString());
     sessionStorage.setItem("farmingGameName", game.name);
@@ -1278,6 +1256,7 @@ function autoFarmCampaignsToggle() {
 function autoFarmCampaigns() {
     stopInventoryChecking();
     sessionStorage.removeItem("inventoryCheckElapsedMinutes");
+    sessionStorage.removeItem("farmingMissingChecks");
     if(window.location.pathname !== "/drops/campaigns") {
         popupText("Returning to Campaigns page to farm");
         cleanRedirect("https://www.twitch.tv/drops/campaigns");
@@ -1511,6 +1490,7 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
     sessionStorage.removeItem("farmingLastProgress");
     sessionStorage.removeItem("farmingStalledChecks");
     sessionStorage.removeItem("farmingNoProgressChecks");
+    sessionStorage.removeItem("farmingMissingChecks");
     var streamUrl = streamHref.startsWith('http') ? streamHref : "https://www.twitch.tv" + streamHref;
     var settings = getDropSettings();
     var remainingMinutes = calculateTimeRemaining(campaign.endDate);
@@ -1534,8 +1514,8 @@ function clearFarmingSessionState() {
     sessionStorage.removeItem("farmingSeenInInventory");
     sessionStorage.removeItem("farmingNoProgressChecks");
     sessionStorage.removeItem("farmingStalledChecks");
+    sessionStorage.removeItem("farmingMissingChecks");
     sessionStorage.removeItem("farmingIsStallFallback");
-    sessionStorage.removeItem("farmingStallNextIdx");
     sessionStorage.removeItem("farmingSkipCampaigns");
     sessionStorage.removeItem("farmingStallSameGame");
     sessionStorage.removeItem("fallbackChannelIndex");
@@ -1587,6 +1567,7 @@ function tryNextAvailableLink(gameName, campaignName) {
         sessionStorage.removeItem("farmingLastProgress");
         sessionStorage.removeItem("farmingStalledChecks");
         sessionStorage.removeItem("farmingNoProgressChecks");
+        sessionStorage.removeItem("farmingMissingChecks");
         var tracker = getDropsTracker();
         var campaign = tracker[gameName] && tracker[gameName].find(function(c) { return c.name === campaignName; });
         var settings = getDropSettings();
@@ -1603,6 +1584,7 @@ function tryNextAvailableLink(gameName, campaignName) {
         sessionStorage.removeItem("farmingLastProgress");
         sessionStorage.removeItem("farmingStalledChecks");
         sessionStorage.removeItem("farmingNoProgressChecks");
+        sessionStorage.removeItem("farmingMissingChecks");
         sessionStorage.removeItem("farmingAllLinks");
         sessionStorage.removeItem("farmingLinkIndex");
         popupText("All links stalled for " + campaignName + ". Trying next campaign");
@@ -1738,11 +1720,32 @@ function runInventoryCheck() {
         sessionStorage.removeItem("farmingNoProgressChecks");
 
         if (!result.exists) {
-            markCampaignCompleted(gameName, campaignName, true);
-            stopInventoryChecking();
-            popupText("Campaign completed: " + campaignName + ". Returning to campaigns");
-            cleanRedirect("https://www.twitch.tv/drops/campaigns");
+            // Same multiple-strike rule as the stall/no-progress counters: the campaign must be
+            // missing from the inventory on consecutive checks before it's considered completed,
+            // so one flaky iframe render can't prematurely mark a campaign done.
+            var missingCount = parseInt(sessionStorage.getItem("farmingMissingChecks") || "0") + 1;
+            if (missingCount >= noProgressCheckLimit) {
+                sessionStorage.removeItem("farmingMissingChecks");
+                markCampaignCompleted(gameName, campaignName, true);
+                stopInventoryChecking();
+                popupText("Campaign completed: " + campaignName + ". Returning to campaigns");
+                cleanRedirect("https://www.twitch.tv/drops/campaigns");
+                return;
+            }
+            sessionStorage.setItem("farmingMissingChecks", String(missingCount));
+            popupText("Debug: " + campaignName + " missing from inventory (" + missingCount + "/" + noProgressCheckLimit + "), continuing to watch");
+            checkForHigherPriorityCampaign().then(function(higherFound) {
+                if (higherFound) {
+                    stopInventoryChecking();
+                    popupText("Higher priority campaign available. Returning to campaigns");
+                    cleanRedirect("https://www.twitch.tv/drops/campaigns");
+                }
+            });
             return;
+        }
+
+        if (result.found) {
+            sessionStorage.removeItem("farmingMissingChecks");
         }
 
         checkForHigherPriorityCampaign().then(function(higherFound) {
@@ -1877,12 +1880,14 @@ function parseLink() {
     setScheduleInput(scheduleList);
 }
 
+/* Currently unused, preserving for potential use in the future
 function duplicateLine() {
     scheduleList = getScheduleInput();
     if(scheduleList.length < 2) return null;
     scheduleList.push(...scheduleList.slice(-2));
     setScheduleInput(scheduleList);
 }
+*/
 
 function returnToPrevious() {
     scheduleList = getScheduleInput();
