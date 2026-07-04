@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.17.0
+// @version      1.17.1
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
 // @grant        GM_registerMenuCommand
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_info
 // @noframes
 // ==/UserScript==
 
@@ -361,16 +362,33 @@ function checkForHigherPriorityCampaign() {
                             }
                         }
                         var pageCampaigns = rewardNames.length > 0 ? rewardNames.map(function(n) { return { name: n }; }) : [{ name: gameName + " Reward" }];
-                        var allCompleted = trackedCampaigns && trackedCampaigns.length > 0 && pageCampaigns.every(function(c) {
-                            var t = trackedCampaigns.find(function(t) { return t.name === c.name; });
-                            return t && t.completed;
-                        });
-                        var pageSummary = pageCampaigns.map(function(c) {
-                            var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
-                            return c.name + (t ? (t.completed ? " [done]" : " [pending]") : " [untracked]");
-                        }).join(", ");
-                        popupText("Debug: Checking reward " + gameName + " - " + pageSummary);
-                        if (!allCompleted) { triggeringGame = gameName; onDone(true); return; }
+                        // Fallback contract: while farming a lower priority stream because this game stalled,
+                        // only return to it for a campaign we have never tracked (a genuinely new one),
+                        // never for the stalled campaigns we fell back from; otherwise the fallback
+                        // stream runs until its Fallback Duration time limit expires.
+                        var isStalled = stalledGames.includes(gameName);
+                        if (isStalled) {
+                            var hasNew = pageCampaigns.some(function(c) {
+                                return !trackedCampaigns || !trackedCampaigns.find(function(t) { return t.name === c.name; });
+                            });
+                            var stalledSummary = pageCampaigns.map(function(c) {
+                                var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
+                                return c.name + (t ? (t.completed ? " [done]" : " [stalled]") : " [NEW]");
+                            }).join(", ");
+                            popupText("Debug: Checking stalled reward " + gameName + " - " + stalledSummary);
+                            if (hasNew) { triggeringGame = gameName; onDone(true); return; }
+                        } else {
+                            var allCompleted = trackedCampaigns && trackedCampaigns.length > 0 && pageCampaigns.every(function(c) {
+                                var t = trackedCampaigns.find(function(t) { return t.name === c.name; });
+                                return t && t.completed;
+                            });
+                            var pageSummary = pageCampaigns.map(function(c) {
+                                var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
+                                return c.name + (t ? (t.completed ? " [done]" : " [pending]") : " [untracked]");
+                            }).join(", ");
+                            popupText("Debug: Checking reward " + gameName + " - " + pageSummary);
+                            if (!allCompleted) { triggeringGame = gameName; onDone(true); return; }
+                        }
                         checkRewardRowsSequentially(rows, rowIdx + 1, onDone);
                     }
                     if (row.querySelector('.drop-details__label')) { afterExpand(); return; }
@@ -1077,6 +1095,15 @@ function renderRewardButtons(rewardContainer) {
 
 function farmRewardCampaign(game, rewardRows, rowIdx, list, idx) {
     if (rowIdx >= rewardRows.length) {
+        var skipList = JSON.parse(sessionStorage.getItem("farmingSkipCampaigns") || "[]");
+        if (skipList.length > 0) {
+            sessionStorage.removeItem("farmingSkipCampaigns");
+            sessionStorage.setItem("farmingIsStallFallback", "true");
+            var stalledGames = JSON.parse(sessionStorage.getItem("farmingStallGameNames") || "[]");
+            if (!stalledGames.includes(game.name)) stalledGames.push(game.name);
+            sessionStorage.setItem("farmingStallGameNames", JSON.stringify(stalledGames));
+            popupText("All reward campaigns stalled for " + game.name + ". Trying next priority game");
+        }
         farmNextPriority(list, idx + 1);
         return;
     }
@@ -1158,6 +1185,13 @@ function parseRewardAndQueue(game, rewardRow, rewardRows, rowIdx, list, idx) {
     var trackedCampaign = tracker[game.name] && tracker[game.name].find(function(c) { return c.name === campaignName; });
     if (trackedCampaign && trackedCampaign.completed) {
         popupText("Reward already completed: " + campaignName + ", moving to next reward");
+        farmRewardCampaign(game, rewardRows, rowIdx + 1, list, idx);
+        return;
+    }
+
+    var skipList = JSON.parse(sessionStorage.getItem("farmingSkipCampaigns") || "[]");
+    if (skipList.includes(campaignName)) {
+        popupText("Reward stalled previously: " + campaignName + ", moving to next reward");
         farmRewardCampaign(game, rewardRows, rowIdx + 1, list, idx);
         return;
     }
@@ -1995,6 +2029,12 @@ function isValidHttpUrl(string) {
 
 function popupText(string) {
     if (string.startsWith("Debug:") && !debug) { return; }
+    var current = new Date();
+    var mins = ("0"+current.getMinutes()).slice(-2);
+    var detailedString = string + " | " + current.getHours() + ":" + mins + ", v" + GM_info.script.version;
+    var pastLogHistory = sessionStorage.getItem("ATQPermaLog") == null ? "" : sessionStorage.getItem("ATQPermaLog") + " /// ";
+    var currentLogHistory = pastLogHistory + detailedString;
+    sessionStorage.setItem("ATQPermaLog", currentLogHistory);
     removeConfirmPopup();
     var box = document.createElement("div");
     box.id = "userscriptPopupWindow";
