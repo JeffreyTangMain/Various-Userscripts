@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      1.16.4
+// @version      1.17.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming.
 // @author       Main
 // @match        *://www.twitch.tv/*
@@ -42,7 +42,6 @@ var campaignsIframe = null;
 var iframeKillTimeout = null;
 var iframeCheckGen = 0;
 var streamViewerCountSeen = false;
-var NO_PROGRESS_CHECK_LIMIT = 2;
 
 var sessionStorageNull = sessionStorage.getItem('scheduleStorage') == null;
 
@@ -635,7 +634,6 @@ function openCampaignManager() {
             #CampaignManagerWrapper { position:fixed; width:60rem; max-height:calc(100vh - 3rem); left:50%; top:50%; transform:translate(-50%,-50%); z-index:99999; display:flex; flex-direction:column; background:#18181b; padding:16px; border-radius:10px; box-shadow:0 12px 48px rgba(0,0,0,0.8); color:#efeff1; }
             .atq-titlebar { display:flex; align-items:center; margin-bottom:12px; }
             .atq-title { font-size:1.05rem; font-weight:700; color:#efeff1; letter-spacing:0.04em; text-transform:uppercase; flex:1; }
-            .atq-settings { background:#0e0e10; border:1px solid #2a2a35; border-radius:6px; padding:9px 12px; margin-bottom:10px; display:flex; flex-direction:column; gap:7px; }
             .atq-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
             .atq-label { font-size:0.88rem; font-weight:500; color:#adadb8; white-space:nowrap; }
             .atq-input { background:#18181b; border:1px solid #3a3a4a; border-radius:4px; color:#efeff1; font-size:0.92rem; padding:4px 7px; outline:none; transition:border-color 0.15s; }
@@ -709,29 +707,21 @@ function openCampaignManager() {
     titlebar.appendChild(mkBtn('✕', function() { outer.remove(); }, 'atq-btn atq-btn-ghost'));
     outer.appendChild(titlebar);
 
-    var settingsDiv = document.createElement('div');
-    settingsDiv.className = 'atq-settings';
-
     var checkInput = mkInput('number', settings.checkIntervalMinutes || 10, 'atq-input-num');
     var offlineCheckInput = mkInput('number', settings.offlineCheckMinutes || 1, 'atq-input-num');
     var fallbackMinInput = mkInput('number', settings.fallbackMinutes || 30, 'atq-input-num');
-    var r1 = document.createElement('div');
-    r1.className = 'atq-row';
-    r1.appendChild(mkLabel('Drop Check Minutes:')); r1.appendChild(checkInput);
-    r1.appendChild(mkLabel('Offline Check Minutes:')); r1.appendChild(offlineCheckInput);
-    r1.appendChild(mkLabel('Fallback Duration:')); r1.appendChild(fallbackMinInput); r1.appendChild(mkLabel('min'));
-
-    settingsDiv.appendChild(r1);
-    outer.appendChild(settingsDiv);
+    var noProgressInput = mkInput('number', settings.noProgressCheckLimit || 2, 'atq-input-num');
 
     var tabsDiv = document.createElement('div');
     tabsDiv.className = 'atq-tabs';
     var priorityTabBtn = mkBtn('Priority', function() { setTab('priority'); }, 'atq-tab');
     var fallbackTabBtn = mkBtn('Fallback', function() { setTab('fallback'); }, 'atq-tab');
     var trackerTabBtn = mkBtn('Tracker', function() { setTab('tracker'); }, 'atq-tab');
+    var settingsTabBtn = mkBtn('Settings', function() { setTab('settings'); }, 'atq-tab');
     tabsDiv.appendChild(priorityTabBtn);
     tabsDiv.appendChild(fallbackTabBtn);
     tabsDiv.appendChild(trackerTabBtn);
+    tabsDiv.appendChild(settingsTabBtn);
     outer.appendChild(tabsDiv);
 
     var contentArea = document.createElement('div');
@@ -748,7 +738,8 @@ function openCampaignManager() {
             checkIntervalMinutes: parseInt(checkInput.value) || 10,
             offlineCheckMinutes: parseInt(offlineCheckInput.value) || 1,
             fallbackChannels: fallbackChannels,
-            fallbackMinutes: parseInt(fallbackMinInput.value) || 30
+            fallbackMinutes: parseInt(fallbackMinInput.value) || 30,
+            noProgressCheckLimit: parseInt(noProgressInput.value) || 2
         });
         setDropsTracker(localTracker);
         popupText('Settings saved');
@@ -888,16 +879,36 @@ function openCampaignManager() {
         });
     }
 
+    function renderSettings() {
+        contentArea.innerHTML = '';
+        function settingRow(labelText, input, suffix) {
+            var row = document.createElement('div');
+            row.className = 'atq-row';
+            row.appendChild(mkLabel(labelText));
+            row.appendChild(input);
+            if (suffix) row.appendChild(mkLabel(suffix));
+            contentArea.appendChild(row);
+        }
+        settingRow('Drop Check Minutes:', checkInput);
+        settingRow('Offline Check Minutes:', offlineCheckInput);
+        settingRow('Fallback Duration:', fallbackMinInput, 'min');
+        settingRow('No Progress Check Limit:', noProgressInput, 'checks');
+    }
+
     function setTab(tab) {
         priorityTabBtn.classList.toggle('atq-active', tab === 'priority');
         fallbackTabBtn.classList.toggle('atq-active', tab === 'fallback');
         trackerTabBtn.classList.toggle('atq-active', tab === 'tracker');
+        settingsTabBtn.classList.toggle('atq-active', tab === 'settings');
         footer.innerHTML = '';
         if (tab === 'priority') {
             renderPriority();
             footer.appendChild(mkBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
         } else if (tab === 'fallback') {
             renderFallback();
+            footer.appendChild(mkBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
+        } else if (tab === 'settings') {
+            renderSettings();
             footer.appendChild(mkBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
         } else {
             renderTracker();
@@ -1162,6 +1173,8 @@ function parseRewardAndQueue(game, rewardRow, rewardRows, rowIdx, list, idx) {
     sessionStorage.setItem("farmingAllLinks", JSON.stringify([categoryHref]));
     sessionStorage.setItem("farmingLinkIndex", "0");
     sessionStorage.removeItem("farmingLastProgress");
+    sessionStorage.removeItem("farmingStalledChecks");
+    sessionStorage.removeItem("farmingNoProgressChecks");
     queueStreamFor(streamUrl, finalMinutes);
     sessionStorage.setItem("farmingGameIdx", idx.toString());
     sessionStorage.setItem("farmingGameName", game.name);
@@ -1183,7 +1196,8 @@ function getDropSettings() {
         checkIntervalMinutes: s.checkIntervalMinutes || 10,
         offlineCheckMinutes: s.offlineCheckMinutes || 1,
         fallbackChannels: s.fallbackChannels,
-        fallbackMinutes: s.fallbackMinutes || 30
+        fallbackMinutes: s.fallbackMinutes || 30,
+        noProgressCheckLimit: s.noProgressCheckLimit || 2
     };
 }
 
@@ -1454,6 +1468,8 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
     sessionStorage.setItem("farmingAllLinks", JSON.stringify(links.map(function(l) { return l.getAttribute('href'); })));
     sessionStorage.setItem("farmingLinkIndex", String(links.length - 1));
     sessionStorage.removeItem("farmingLastProgress");
+    sessionStorage.removeItem("farmingStalledChecks");
+    sessionStorage.removeItem("farmingNoProgressChecks");
     var streamUrl = streamHref.startsWith('http') ? streamHref : "https://www.twitch.tv" + streamHref;
     var settings = getDropSettings();
     var remainingMinutes = calculateTimeRemaining(campaign.endDate);
@@ -1476,6 +1492,7 @@ function clearFarmingSessionState() {
     sessionStorage.removeItem("farmingLastProgress");
     sessionStorage.removeItem("farmingSeenInInventory");
     sessionStorage.removeItem("farmingNoProgressChecks");
+    sessionStorage.removeItem("farmingStalledChecks");
     sessionStorage.removeItem("farmingIsStallFallback");
     sessionStorage.removeItem("farmingStallNextIdx");
     sessionStorage.removeItem("farmingSkipCampaigns");
@@ -1525,6 +1542,8 @@ function tryNextAvailableLink(gameName, campaignName) {
         var nextUrl = nextHref.startsWith('http') ? nextHref : "https://www.twitch.tv" + nextHref;
         sessionStorage.setItem("farmingLinkIndex", String(nextIndex));
         sessionStorage.removeItem("farmingLastProgress");
+        sessionStorage.removeItem("farmingStalledChecks");
+        sessionStorage.removeItem("farmingNoProgressChecks");
         var tracker = getDropsTracker();
         var campaign = tracker[gameName] && tracker[gameName].find(function(c) { return c.name === campaignName; });
         var settings = getDropSettings();
@@ -1539,6 +1558,8 @@ function tryNextAvailableLink(gameName, campaignName) {
         sessionStorage.setItem("farmingSkipCampaigns", JSON.stringify(skipped));
         sessionStorage.setItem("farmingStallSameGame", String(gameIdx));
         sessionStorage.removeItem("farmingLastProgress");
+        sessionStorage.removeItem("farmingStalledChecks");
+        sessionStorage.removeItem("farmingNoProgressChecks");
         sessionStorage.removeItem("farmingAllLinks");
         sessionStorage.removeItem("farmingLinkIndex");
         popupText("All links stalled for " + campaignName + ". Trying next campaign");
@@ -1644,6 +1665,7 @@ function runInventoryCheck() {
         return;
     }
     checkInventoryForCampaign(campaignName, campaign.endDate).then(function(result) {
+        var noProgressCheckLimit = getDropSettings().noProgressCheckLimit;
         var seenCampaign = sessionStorage.getItem("farmingSeenInInventory");
         if (result.found) {
             sessionStorage.setItem("farmingSeenInInventory", campaignName);
@@ -1651,7 +1673,7 @@ function runInventoryCheck() {
 
         if (seenCampaign !== campaignName && !result.found) {
             var missCount = parseInt(sessionStorage.getItem("farmingNoProgressChecks") || "0") + 1;
-            if (missCount >= NO_PROGRESS_CHECK_LIMIT) {
+            if (missCount >= noProgressCheckLimit) {
                 sessionStorage.removeItem("farmingNoProgressChecks");
                 stopInventoryChecking();
                 popupText(campaignName + " never registered in inventory. Treating as stalled, trying next link");
@@ -1659,7 +1681,7 @@ function runInventoryCheck() {
                 return;
             }
             sessionStorage.setItem("farmingNoProgressChecks", String(missCount));
-            popupText("Debug: " + campaignName + " not yet in inventory (" + missCount + "/" + NO_PROGRESS_CHECK_LIMIT + "), continuing to watch");
+            popupText("Debug: " + campaignName + " not yet in inventory (" + missCount + "/" + noProgressCheckLimit + "), continuing to watch");
             checkForHigherPriorityCampaign().then(function(higherFound) {
                 if (higherFound) {
                     stopInventoryChecking();
@@ -1691,12 +1713,17 @@ function runInventoryCheck() {
                 if (currentProgress !== null) {
                     sessionStorage.setItem("farmingLastProgress", currentProgress);
                     if (lastProgress !== null && currentProgress === lastProgress) {
-                        var storedLinks = JSON.parse(sessionStorage.getItem("farmingAllLinks") || "[]");
-                        var isCategory = storedLinks.length > 0 && storedLinks[storedLinks.length - 1].includes("/directory/category");
-                        if (!isCategory) {
+                        var stallCount = parseInt(sessionStorage.getItem("farmingStalledChecks") || "0") + 1;
+                        if (stallCount >= noProgressCheckLimit) {
+                            sessionStorage.removeItem("farmingStalledChecks");
                             stopInventoryChecking();
                             tryNextAvailableLink(gameName, campaignName);
+                        } else {
+                            sessionStorage.setItem("farmingStalledChecks", String(stallCount));
+                            popupText("Debug: " + campaignName + " progress unchanged (" + stallCount + "/" + noProgressCheckLimit + "), continuing to watch");
                         }
+                    } else {
+                        sessionStorage.removeItem("farmingStalledChecks");
                     }
                 }
             }
@@ -1707,7 +1734,6 @@ function runInventoryCheck() {
 function startInventoryChecking() {
     stopInventoryChecking();
     streamViewerCountSeen = false;
-    sessionStorage.removeItem("farmingNoProgressChecks");
     var settings = getDropSettings();
     var checkIntervalMinutes = settings.checkIntervalMinutes || 10;
     var offlineCheckMinutes = settings.offlineCheckMinutes || 1;
