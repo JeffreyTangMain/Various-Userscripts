@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      2.0.1
+// @version      2.1.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming. Also watch streams automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -350,22 +350,10 @@ function checkForHigherPriorityCampaign() {
                     function afterExpand() {
                         if (aborted()) { return; }
                         var trackedCampaigns = tracker[gameName];
-                        var rewardNames = [];
-                        row.querySelectorAll('.drop-benefit__image-container img').forEach(function(img) {
-                            if (img.alt) rewardNames.push(img.alt);
-                        });
-                        if (rewardNames.length === 0) {
-                            var rewardsLabel = Array.from(row.querySelectorAll('.drop-details__label')).find(function(l) {
-                                return l.textContent.trim() === 'Rewards';
-                            });
-                            if (rewardsLabel) {
-                                rewardsLabel.parentElement.querySelectorAll('p').forEach(function(p) {
-                                    var t = p.textContent.trim();
-                                    if (t) rewardNames.push(t);
-                                });
-                            }
-                        }
-                        var pageCampaigns = rewardNames.length > 0 ? rewardNames.map(function(n) { return { name: n }; }) : [{ name: gameName + " Reward" }];
+                        // Same parser as the farming side, so the campaign identity matches
+                        // what gets registered in the tracker (one campaign per accordion,
+                        // named after its first reward)
+                        var pageCampaigns = [parseRewardCampaignFromRow({ name: gameName }, row)];
                         // Fallback contract: while farming a lower priority stream because this game stalled,
                         // only return to it for a campaign we have never tracked (a genuinely new one),
                         // never for the stalled campaigns we fell back from; otherwise the fallback
@@ -589,6 +577,32 @@ function parseCampaignsFromRow(rowOrRows) {
         }
     });
     return campaigns;
+}
+
+function parseRewardCampaignFromRow(game, row) {
+    // Reward campaign accordions have no per-drop <strong> names or dates like drop campaign
+    // rows do, so the whole accordion becomes one campaign named after its first reward,
+    // matching how it registers in the inventory page
+    var dateEl = row.querySelector('[class*="caYeGJ"]');
+    var endDateRaw = dateEl ? dateEl.textContent.trim() : null;
+    var endDate = endDateRaw ? parseEndDateFromRange(endDateRaw) : null;
+    var rewardNames = [];
+    row.querySelectorAll('.drop-benefit__image-container img').forEach(function(img) {
+        if (img.alt) rewardNames.push(img.alt);
+    });
+    if (rewardNames.length === 0) {
+        var rewardsLabel = Array.from(row.querySelectorAll('.drop-details__label')).find(function(l) {
+            return l.textContent.trim() === 'Rewards';
+        });
+        if (rewardsLabel) {
+            rewardsLabel.parentElement.querySelectorAll('p').forEach(function(p) {
+                var t = p.textContent.trim();
+                if (t) rewardNames.push(t);
+            });
+        }
+    }
+    var name = rewardNames.length > 0 ? rewardNames[0] : (game.name + " Reward");
+    return { name: name, endDate: endDate, endDateRaw: endDateRaw, rewardRow: row };
 }
 
 function parseEndDateToMs(endDateString) {
@@ -1074,134 +1088,6 @@ function renderRewardButtons(rewardContainer) {
     });
 }
 
-function farmRewardCampaign(game, rewardRows, rowIdx, list, idx) {
-    if (rowIdx >= rewardRows.length) {
-        var skipList = JSON.parse(sessionStorage.getItem("farmingSkipCampaigns") || "[]");
-        if (skipList.length > 0) {
-            sessionStorage.removeItem("farmingSkipCampaigns");
-            sessionStorage.setItem("farmingIsStallFallback", "true");
-            var stalledGames = JSON.parse(sessionStorage.getItem("farmingStallGameNames") || "[]");
-            if (!stalledGames.includes(game.name)) stalledGames.push(game.name);
-            sessionStorage.setItem("farmingStallGameNames", JSON.stringify(stalledGames));
-            popupText("All reward campaigns stalled for " + game.name + ". Trying next priority game");
-        }
-        farmNextPriority(list, idx + 1);
-        return;
-    }
-    var rewardRow = rewardRows[rowIdx];
-    if (rewardRow.querySelector('.drop-details__label')) {
-        parseRewardAndQueue(game, rewardRow, rewardRows, rowIdx, list, idx);
-        return;
-    }
-    var accordionBtn = rewardRow.querySelector('button[aria-expanded]');
-    var parseTimer = null;
-    var detailObserver = new MutationObserver(function() {
-        if (!rewardRow.querySelector('.drop-details__label')) return;
-        clearTimeout(parseTimer);
-        clearTimeout(detailObserverTimeout);
-        parseTimer = setTimeout(function() {
-            detailObserver.disconnect();
-            parseRewardAndQueue(game, rewardRow, rewardRows, rowIdx, list, idx);
-        }, 500);
-    });
-    detailObserver.observe(rewardRow, { childList: true, subtree: true });
-    var detailObserverTimeout = setTimeout(function() {
-        clearTimeout(parseTimer);
-        detailObserver.disconnect();
-        farmRewardCampaign(game, rewardRows, rowIdx + 1, list, idx);
-    }, 10000);
-    if (accordionBtn && accordionBtn.getAttribute('aria-expanded') !== 'true') {
-        accordionBtn.click();
-    }
-}
-
-// Note: this should be reworked in the future
-// the parsing should happen as a part of the existing
-// code that handles open drop campaigns
-function parseRewardAndQueue(game, rewardRow, rewardRows, rowIdx, list, idx) {
-    var dateEl = rewardRow.querySelector('[class*="caYeGJ"]');
-    var endDate = dateEl ? parseEndDateFromRange(dateEl.textContent.trim()) : null;
-
-    var rewardNames = [];
-    rewardRow.querySelectorAll('.drop-benefit__image-container img').forEach(function(img) {
-        if (img.alt) rewardNames.push(img.alt);
-    });
-    if (rewardNames.length === 0) {
-        var rewardsLabel = Array.from(rewardRow.querySelectorAll('.drop-details__label')).find(function(l) {
-            return l.textContent.trim() === 'Rewards';
-        });
-        if (rewardsLabel) {
-            rewardsLabel.parentElement.querySelectorAll('p').forEach(function(p) {
-                var t = p.textContent.trim();
-                if (t) rewardNames.push(t);
-            });
-        }
-    }
-
-    var earnLabel = Array.from(rewardRow.querySelectorAll('.drop-details__label')).find(function(l) {
-        return /how to earn/i.test(l.textContent);
-    });
-    var watchMinutes = 30;
-    var categoryHref = null;
-    if (earnLabel) {
-        var earnSection = earnLabel.parentElement;
-        var strongEl = earnSection.querySelector('strong');
-        if (strongEl) {
-            var m = strongEl.textContent.match(/(\d+)/);
-            if (m) watchMinutes = parseInt(m[1]);
-        }
-        earnSection.querySelectorAll('a').forEach(function(a) {
-            var href = a.getAttribute('href');
-            if (href && href.includes('/directory/category')) categoryHref = href;
-        });
-    }
-
-    if (!categoryHref) {
-        popupText("No category link found for: " + game.name + ", skipping");
-        farmRewardCampaign(game, rewardRows, rowIdx + 1, list, idx);
-        return;
-    }
-
-    var campaignName = rewardNames.length > 0 ? rewardNames[0] : (game.name + " Reward");
-    addCampaignToTracker(game.name, campaignName, endDate);
-
-    var tracker = getDropsTracker();
-    var trackedCampaign = tracker[game.name] && tracker[game.name].find(function(c) { return c.name === campaignName; });
-    if (trackedCampaign && trackedCampaign.completed) {
-        popupText("Reward already completed: " + campaignName + ", moving to next reward");
-        farmRewardCampaign(game, rewardRows, rowIdx + 1, list, idx);
-        return;
-    }
-
-    var skipList = JSON.parse(sessionStorage.getItem("farmingSkipCampaigns") || "[]");
-    if (skipList.includes(campaignName)) {
-        popupText("Reward stalled previously: " + campaignName + ", moving to next reward");
-        farmRewardCampaign(game, rewardRows, rowIdx + 1, list, idx);
-        return;
-    }
-
-    var streamUrl = (categoryHref.startsWith('http') ? categoryHref : "https://www.twitch.tv" + categoryHref);
-    streamUrl = normalizeTwitchUrl(streamUrl);
-
-    var settings = getDropSettings();
-    var isStallFallback = sessionStorage.getItem("farmingIsStallFallback") === "true";
-    var remainingMinutes = endDate ? calculateTimeRemaining(endDate) : watchMinutes;
-    var finalMinutes = isStallFallback ? (settings.fallbackMinutes || 30) : (remainingMinutes > 0 ? remainingMinutes : watchMinutes);
-
-    sessionStorage.setItem("farmingAllLinks", JSON.stringify([categoryHref]));
-    sessionStorage.setItem("farmingLinkIndex", "0");
-    sessionStorage.removeItem("farmingLastProgress");
-    sessionStorage.removeItem("farmingStalledChecks");
-    sessionStorage.removeItem("farmingNoProgressChecks");
-    sessionStorage.removeItem("farmingMissingChecks");
-    queueStreamFor(streamUrl, finalMinutes);
-    sessionStorage.setItem("farmingGameIdx", idx.toString());
-    sessionStorage.setItem("farmingGameName", game.name);
-    sessionStorage.setItem("farmingCampaignName", campaignName);
-    popupText("Queued reward: " + campaignName + " for " + finalMinutes + " min");
-    processSchedule();
-}
-
 function getDropList() {
     return GM_getValue('dropGameList', []);
 }
@@ -1286,55 +1172,51 @@ function farmNextPriority(list, idx) {
         return;
     }
     var game = list[idx];
+    // Reward campaign accordions and drop campaign rows are formatted differently, but both
+    // get collected here and merged into one campaign list per game
+    var rewardRows = [];
     var rewardHeader = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Reward Campaigns");
     if (rewardHeader) {
         var rewardContainer = findCampaignContainerAllSiblings(rewardHeader);
         if (rewardContainer) {
-            var rewardRows = getRewardRows(rewardContainer).filter(function(row) {
+            rewardRows = getRewardRows(rewardContainer).filter(function(row) {
                 var imgEl = row.querySelector('img.partner-thumbnail');
                 return imgEl && imgEl.alt === game.name;
             });
-            if (rewardRows.length > 0) {
-                farmRewardCampaign(game, rewardRows, 0, list, idx);
-                return;
-            }
         }
     }
+    var matchingRows = [];
     var header = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Drop Campaigns");
-    if(!header) {
+    var campaignContainer = header ? findCampaignContainer(header) : null;
+    if (campaignContainer) {
+        matchingRows = Array.from(campaignContainer.children).filter(function(row) {
+            var nameEl = row.querySelector('p');
+            return nameEl && nameEl.textContent.trim() === game.name;
+        });
+    }
+    if (!campaignContainer && rewardRows.length === 0) {
         popupText("Could not find campaigns list");
         return;
     }
-    var campaignContainer = findCampaignContainer(header);
-    if(!campaignContainer) {
-        popupText("Could not find campaigns list");
-        return;
-    }
-    var rows = Array.from(campaignContainer.children);
-    var matchingRows = rows.filter(function(row) {
-        var nameEl = row.querySelector('p');
-        return nameEl && nameEl.textContent.trim() === game.name;
-    });
-    popupText("Debug: Found " + matchingRows.length + " row(s) for " + game.name + " in campaign list");
-    if(matchingRows.length === 0) {
+    popupText("Debug: Found " + matchingRows.length + " drop row(s) and " + rewardRows.length + " reward row(s) for " + game.name);
+    if (matchingRows.length === 0 && rewardRows.length === 0) {
         popupText("Campaign not found on page: " + game.name);
         farmNextPriority(list, idx + 1);
         return;
     }
-    var toLoad = matchingRows.filter(function(r) {
+    var toLoad = rewardRows.concat(matchingRows).filter(function(r) {
         return !r.querySelector('.drop-details__label');
     });
-    if(toLoad.length === 0) {
-        parseAllCampaignsAndQueue(game, matchingRows, list, idx);
-        return;
-    }
     expandRowsSequentially(toLoad, function() {
-        parseAllCampaignsAndQueue(game, matchingRows, list, idx);
+        parseAllCampaignsAndQueue(game, matchingRows, rewardRows, list, idx);
     });
 }
 
-function parseAllCampaignsAndQueue(game, matchingRows, list, idx) {
+function parseAllCampaignsAndQueue(game, matchingRows, rewardRows, list, idx) {
     var campaigns = parseCampaignsFromRow(matchingRows);
+    rewardRows.forEach(function(row) {
+        campaigns.push(parseRewardCampaignFromRow(game, row));
+    });
     popupText("Debug: Parsed " + campaigns.length + " campaign(s) for " + game.name + ": [" + campaigns.map(function(c) { return c.name; }).join(", ") + "]");
     if (campaigns.length === 0) {
         popupText("No campaigns found for: " + game.name + ", skipping");
@@ -1428,34 +1310,41 @@ function queueStreamFor(url, watchMinutes) {
 
 function queueCampaignStream(game, matchingRows, campaign, list, idx) {
     var rows = Array.isArray(matchingRows) ? matchingRows : [matchingRows];
-    var matchingStrong = null;
-    var campaignRow = null;
-    for (var r = 0; r < rows.length; r++) {
-        var s = Array.from(rows[r].querySelectorAll('strong')).find(function(el) {
-            return !el.closest('.drop-details__label') && el.textContent.trim() === campaign.name;
-        });
-        if (s) {
-            matchingStrong = s;
-            campaignRow = rows[r];
-            break;
-        }
-    }
     var targetBlock = null;
-    if (matchingStrong) {
-        var el = matchingStrong.parentElement;
-        while (el && el !== campaignRow) {
-            var hasEarnLabel = Array.from(el.querySelectorAll('.drop-details__label'))
-                .some(function(lbl) { return lbl.textContent.includes('How to Earn'); });
-            if (hasEarnLabel) { targetBlock = el; break; }
-            el = el.parentElement;
+    if (campaign.rewardRow) {
+        // Reward campaigns carry their accordion row directly since they have no
+        // per-campaign <strong> name to locate inside the drop campaign rows
+        targetBlock = campaign.rewardRow;
+    } else {
+        var matchingStrong = null;
+        var campaignRow = null;
+        for (var r = 0; r < rows.length; r++) {
+            var s = Array.from(rows[r].querySelectorAll('strong')).find(function(el) {
+                return !el.closest('.drop-details__label') && el.textContent.trim() === campaign.name;
+            });
+            if (s) {
+                matchingStrong = s;
+                campaignRow = rows[r];
+                break;
+            }
+        }
+        if (matchingStrong) {
+            var el = matchingStrong.parentElement;
+            while (el && el !== campaignRow) {
+                var hasEarnLabel = Array.from(el.querySelectorAll('.drop-details__label'))
+                    .some(function(lbl) { return /how to earn/i.test(lbl.textContent); });
+                if (hasEarnLabel) { targetBlock = el; break; }
+                el = el.parentElement;
+            }
         }
     }
     if (!targetBlock) {
         popupText("Could not find campaign block for: " + campaign.name);
         return;
     }
+    // Matches "How to Earn the Drop" (drop campaigns) and "How To Earn The Reward" (reward campaigns)
     var earnLabel = Array.from(targetBlock.querySelectorAll('.drop-details__label'))
-        .find(el => el.textContent.includes("How to Earn the Drop"));
+        .find(el => /how to earn/i.test(el.textContent));
     if(!earnLabel) {
         popupText("Could not read drop details for: " + campaign.name);
         return;
@@ -1466,7 +1355,9 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
         return;
     }
     var items = Array.from(ul.querySelectorAll('li'));
-    var watchItems = items.filter(li => /watch for/i.test(li.textContent));
+    // Matches "Watch for 20 minutes" (drop campaigns) and "Watch 20 minutes" (reward campaigns);
+    // campaigns earned another way (e.g. subscriptions) have no watch item and get skipped
+    var watchItems = items.filter(li => /watch\s+(for\s+)?\d+/i.test(li.textContent));
     if(watchItems.length === 0) {
         popupText("No watchable drops for: " + campaign.name + ", marking complete");
         markCampaignCompleted(game.name, campaign.name, true);
@@ -1478,7 +1369,7 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
         }
         return;
     }
-    var firstLi = items[0];
+    var firstLi = watchItems[0];
     var links = Array.from(firstLi.querySelectorAll('a'));
     var streamHref = links.length > 0 ? links[links.length - 1].getAttribute('href') : null;
     if(!streamHref) {
