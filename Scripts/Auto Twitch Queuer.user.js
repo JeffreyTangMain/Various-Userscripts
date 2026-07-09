@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      2.1.0
+// @version      2.1.1
 // @description  Queue a list of streams to open at specific times with automatic campaign farming. Also watch streams automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -1308,6 +1308,17 @@ function queueStreamFor(url, watchMinutes) {
     sessionStorage.setItem("scheduleStorage", scheduleString());
 }
 
+function skipCampaignAndContinue(game, campaign, list, idx) {
+    // Dead-ending on a queue failure would freeze the farming loop entirely, so mark the
+    // campaign as skipped for this session and re-scan the game from scratch. The re-scan
+    // also picks up fresh DOM nodes in case the failure was a stale row after a re-render,
+    // and the skip list guarantees termination (all skipped -> stall path -> next game).
+    var skipList = JSON.parse(sessionStorage.getItem("farmingSkipCampaigns") || "[]");
+    if (!skipList.includes(campaign.name)) skipList.push(campaign.name);
+    sessionStorage.setItem("farmingSkipCampaigns", JSON.stringify(skipList));
+    farmNextPriority(list, idx);
+}
+
 function queueCampaignStream(game, matchingRows, campaign, list, idx) {
     var rows = Array.isArray(matchingRows) ? matchingRows : [matchingRows];
     var targetBlock = null;
@@ -1339,19 +1350,22 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
         }
     }
     if (!targetBlock) {
-        popupText("Could not find campaign block for: " + campaign.name);
+        popupText("Could not find campaign block for: " + campaign.name + ", skipping");
+        skipCampaignAndContinue(game, campaign, list, idx);
         return;
     }
     // Matches "How to Earn the Drop" (drop campaigns) and "How To Earn The Reward" (reward campaigns)
     var earnLabel = Array.from(targetBlock.querySelectorAll('.drop-details__label'))
         .find(el => /how to earn/i.test(el.textContent));
     if(!earnLabel) {
-        popupText("Could not read drop details for: " + campaign.name);
+        popupText("Could not read drop details for: " + campaign.name + ", skipping");
+        skipCampaignAndContinue(game, campaign, list, idx);
         return;
     }
     var ul = earnLabel.parentElement.querySelector('ul');
     if(!ul) {
-        popupText("Could not read drop details for: " + campaign.name);
+        popupText("Could not read drop details for: " + campaign.name + ", skipping");
+        skipCampaignAndContinue(game, campaign, list, idx);
         return;
     }
     var items = Array.from(ul.querySelectorAll('li'));
@@ -1369,11 +1383,23 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
         }
         return;
     }
-    var firstLi = watchItems[0];
-    var links = Array.from(firstLi.querySelectorAll('a'));
+    // Prefer links inside the watch-time item (so a reward's "visit your Drops Inventory"
+    // item can't contribute its link), but some drop campaigns put the channel/category
+    // links in a different list item than the watch-time one, so fall back to the first
+    // item that actually has links
+    function watchableLinks(li) {
+        return Array.from(li.querySelectorAll('a')).filter(function(a) {
+            var href = a.getAttribute('href') || '';
+            return href && !href.includes('/drops/inventory');
+        });
+    }
+    var linkLi = watchItems.find(function(li) { return watchableLinks(li).length > 0; })
+        || items.find(function(li) { return watchableLinks(li).length > 0; });
+    var links = linkLi ? watchableLinks(linkLi) : [];
     var streamHref = links.length > 0 ? links[links.length - 1].getAttribute('href') : null;
     if(!streamHref) {
-        popupText("No stream link found for: " + campaign.name);
+        popupText("No stream link found for: " + campaign.name + ", skipping");
+        skipCampaignAndContinue(game, campaign, list, idx);
         return;
     }
     sessionStorage.setItem("farmingAllLinks", JSON.stringify(links.map(function(l) { return l.getAttribute('href'); })));
