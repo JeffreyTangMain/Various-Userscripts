@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      2.1.1
+// @version      2.1.2
 // @description  Queue a list of streams to open at specific times with automatic campaign farming. Also watch streams automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -2056,7 +2056,7 @@ async function detectSite() {
             sessionStorage.setItem("storedCurrentTarget", window.location.href.replace("/about", ""));
             sessionStorage.removeItem("twitchWatchedCategory");
 
-            setTimeout(resetLocation, 60000);
+            setTimeout(resetLocation, 180000);
             createLoopingInterval(twitchAboutMethod, 1000);
         } else if (locationContains("?filter=drops&sort=VIEWER_COUNT")) {
             // Loop leads to 5 then back if disruption is found
