@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      2.1.2
+// @version      3.0.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming. Also watch streams automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -16,18 +16,28 @@
 // Documenting globals for JSHint to not throw an error for JQuery's $ function
 /* globals $ */
 
-var debug = false;
-
+// Menu registration runs first so that nothing below can stop the menu from appearing.
+// The debug entries are gone on purpose; every debug action lives in the Progress
+// Manager's Debug tab now.
 GM_registerMenuCommand("Open Schedule", grabSchedule);
 GM_registerMenuCommand("Next In Queue", nextinQueue);
 GM_registerMenuCommand("Cancel Schedule", cancelQueue);
 GM_registerMenuCommand("Auto Farm Campaigns", autoFarmCampaignsToggle);
 GM_registerMenuCommand("Campaign Manager", openCampaignManager);
-if (debug) {
-    GM_registerMenuCommand("Debug: Run Inventory Check", runInventoryCheck);
-    GM_registerMenuCommand("Debug: Run Offline Check", runOfflineCheck);
-    GM_registerMenuCommand("Debug: Run Priority Check", runPriorityCheck);
-    GM_registerMenuCommand("Debug: Cull Iframes", debugCullIframes);
+GM_registerMenuCommand("Progress Manager", openProgressManager);
+
+// Debug now only gates whether "Debug:" lines get printed/logged. Every debug action
+// lives in the Progress Manager's Debug tab instead of the userscript menu.
+var debug = false;
+try {
+    debug = GM_getValue('debugLogging', false);
+} catch (e) {
+    console.error("[ATQ] Could not read debugLogging", e);
+}
+
+function setDebugLogging(on) {
+    debug = !!on;
+    try { GM_setValue('debugLogging', debug); } catch (e) { console.error("[ATQ] Could not save debugLogging", e); }
 }
 
 window.addEventListener('pagehide', function() {
@@ -47,6 +57,10 @@ var campaignsIframe = null;
 var iframeKillTimeout = null;
 var iframeCheckGen = 0;
 var streamViewerCountSeen = false;
+var iframeHost = null;
+var progressPanelTimer = null;
+var progressPanelRAF = null;
+var launcherPollTimer = null;
 
 var sessionStorageNull = sessionStorage.getItem('scheduleStorage') == null;
 
@@ -62,6 +76,20 @@ if(window.location.pathname === "/drops/campaigns") {
     injectDropButtons();
 }
 
+// Purely cosmetic chrome, so it goes last and swallows its own errors. It must never be
+// able to prevent injectDropButtons or the auto-farm resume below from running.
+try {
+    if (document.body) {
+        createProgressLauncher();
+    } else {
+        document.addEventListener('DOMContentLoaded', function() {
+            try { createProgressLauncher(); } catch (e) { console.error("[ATQ] launcher failed", e); }
+        });
+    }
+} catch (e) {
+    console.error("[ATQ] launcher failed", e);
+}
+
 if (sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") == "true" &&
     window.location.pathname !== "/drops/campaigns" &&
     window.location.pathname !== "/drops/inventory" &&
@@ -72,11 +100,24 @@ if (sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") == "true" &&
     }, 3000);
 }
 
+// The iframes live in one host element that is created once and NEVER reparented, because
+// moving an iframe in the DOM forces it to reload. The Progress Manager shows them by
+// positioning this host over its content area, not by adopting the nodes.
+function getIframeHost() {
+    if (iframeHost && iframeHost.parentNode) return iframeHost;
+    injectAtqStyles();
+    iframeHost = document.createElement('div');
+    iframeHost.id = 'ATQIframeHost';
+    iframeHost.className = 'atq-iframe-host atq-host-stashed';
+    document.body.appendChild(iframeHost);
+    return iframeHost;
+}
+
 function createHiddenIframe(src) {
     var f = document.createElement('iframe');
-    f.style.display = 'none';
+    f.className = 'atq-frame';
     f.src = src;
-    document.body.appendChild(f);
+    getIframeHost().appendChild(f);
     return f;
 }
 
@@ -196,6 +237,7 @@ function checkForHigherPriorityCampaign() {
             try {
                 var doc = iframe.contentDocument || iframe.contentWindow.document;
                 if (!doc || !doc.body) { resolve(false); return; }
+                sweepExpiredCampaigns();
                 var tracker = getDropsTracker();
                 var triggeringGame = null;
 
@@ -273,7 +315,7 @@ function checkForHigherPriorityCampaign() {
                             popupText("Debug: Checking stalled " + gameName + " - " + stalledSummary);
                             if (hasNew) { triggeringGame = gameName; onDone(true); return; }
                         } else {
-                            var allCompleted = trackedCampaigns && trackedCampaigns.length > 0 && trackedCampaigns.every(function(c) { return c.completed; });
+                            var hasWork = pageCampaignsHaveWork(trackedCampaigns, pageCampaigns);
                             var pageSummary = pageCampaigns.length > 0
                                 ? pageCampaigns.map(function(c) {
                                     var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
@@ -281,7 +323,7 @@ function checkForHigherPriorityCampaign() {
                                 }).join(", ")
                                 : "not expanded";
                             popupText("Debug: Checking " + gameName + " - " + pageSummary);
-                            if (!allCompleted) { triggeringGame = gameName; onDone(true); return; }
+                            if (hasWork) { triggeringGame = gameName; onDone(true); return; }
                         }
                         checkDropRowsSequentially(rows, rowIdx + 1, onDone);
                     }
@@ -370,16 +412,13 @@ function checkForHigherPriorityCampaign() {
                             popupText("Debug: Checking stalled reward " + gameName + " - " + stalledSummary);
                             if (hasNew) { triggeringGame = gameName; onDone(true); return; }
                         } else {
-                            var allCompleted = trackedCampaigns && trackedCampaigns.length > 0 && pageCampaigns.every(function(c) {
-                                var t = trackedCampaigns.find(function(t) { return t.name === c.name; });
-                                return t && t.completed;
-                            });
+                            var hasWork = pageCampaignsHaveWork(trackedCampaigns, pageCampaigns);
                             var pageSummary = pageCampaigns.map(function(c) {
                                 var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
                                 return c.name + (t ? (t.completed ? " [done]" : " [pending]") : " [untracked]");
                             }).join(", ");
                             popupText("Debug: Checking reward " + gameName + " - " + pageSummary);
-                            if (!allCompleted) { triggeringGame = gameName; onDone(true); return; }
+                            if (hasWork) { triggeringGame = gameName; onDone(true); return; }
                         }
                         checkRewardRowsSequentially(rows, rowIdx + 1, onDone);
                     }
@@ -435,6 +474,69 @@ function checkForHigherPriorityCampaign() {
     });
 }
 
+// The inventory page renders every in-progress campaign as a `.inventory-campaign-info`
+// block whose PARENT also holds that campaign's drop tower. The progress bars are siblings
+// of the info block, not descendants, so anything scoped to `.inventory-campaign-info`
+// itself finds nothing and anything scoped to the document finds every campaign's bars.
+function readInventorySnapshot(doc) {
+    var campaigns = [];
+    doc.querySelectorAll('.inventory-campaign-info').forEach(function(info) {
+        var nameLink = info.querySelector('a.tw-link');
+        if (!nameLink) return;
+        var endDate = null;
+        var spans = info.querySelectorAll('span');
+        for (var i = 0; i < spans.length - 1; i++) {
+            if (spans[i].textContent.indexOf('End Date') !== -1) {
+                endDate = spans[i + 1].textContent.trim();
+                break;
+            }
+        }
+        var drops = [];
+        info.parentElement.querySelectorAll('[role="progressbar"]').forEach(function(bar) {
+            // Walk out to the drop tile so the bar can be paired with its reward name
+            var tile = bar;
+            while (tile && !tile.querySelector('img.inventory-drop-image')) tile = tile.parentElement;
+            var texts = [];
+            if (tile) {
+                tile.querySelectorAll('p').forEach(function(p) {
+                    var t = p.textContent.trim();
+                    if (t) texts.push(t);
+                });
+            }
+            var requirement = null;
+            var dropName = null;
+            texts.forEach(function(t) {
+                if (/%\s*of\s/.test(t)) { if (!requirement) requirement = t; }
+                else if (!dropName) { dropName = t; }
+            });
+            drops.push({
+                name: dropName || 'Unnamed drop',
+                percent: bar.getAttribute('aria-valuenow'),
+                requirement: requirement
+            });
+        });
+        campaigns.push({
+            name: nameLink.textContent.trim(),
+            endDate: endDate,
+            drops: drops
+        });
+    });
+    return campaigns;
+}
+
+function saveInventorySnapshot(campaigns) {
+    GM_setValue('dropProgressSnapshot', {
+        takenAt: Date.now(),
+        campaigns: campaigns
+    });
+}
+
+function getInventorySnapshot() {
+    var s = GM_getValue('dropProgressSnapshot', null);
+    if (!s || typeof s !== 'object' || !Array.isArray(s.campaigns)) return null;
+    return s;
+}
+
 function checkInventoryForCampaign(campaignName, endDate) {
     return new Promise(function(resolve) {
         var myGen = iframeCheckGen;
@@ -446,42 +548,51 @@ function checkInventoryForCampaign(campaignName, endDate) {
             try {
                 var doc = iframe.contentDocument || iframe.contentWindow.document;
                 if (!doc || !doc.body) {
-                    done({ exists: true, progress: null });
+                    // ok:false means "the check itself failed", which is not evidence about
+                    // the campaign either way and must not feed the miss/stall counters.
+                    done({ ok: false, exists: true, progress: null });
                     return;
                 }
-                var inventoryItems = doc.querySelectorAll('.inventory-campaign-info');
-                if (inventoryItems.length === 0) {
-                    // No in-progress campaigns can mean two things: the page hasn't loaded yet,
-                    // or the last campaign just completed and the In Progress section is gone.
-                    // If the page shell and the Claimed section's drops are rendered, the
-                    // inventory genuinely loaded empty, so the campaign no longer exists.
-                    var pageLoaded = doc.querySelector('.inventory-page') && doc.querySelector('.inventory-drop-image');
-                    done({ exists: !pageLoaded, progress: null, found: false });
-                    return;
-                }
-                var found = false;
-                inventoryItems.forEach(function(item) {
-                    var nameLink = item.querySelector('a.tw-link');
-                    if (nameLink && nameLink.textContent.trim() === campaignName) {
-                        found = true;
+                var campaigns = readInventorySnapshot(doc);
+                // "Loaded" must not be inferred from the presence of claimed drops: an account
+                // with an empty Claimed section would look permanently unloaded and no campaign
+                // would ever be marked completed. The section headings are always rendered.
+                var pageLoaded = !!doc.querySelector('.inventory-page') &&
+                    Array.from(doc.querySelectorAll('h3,h4,h5')).some(function(h) {
+                        var t = h.textContent.trim();
+                        return t === 'Drops' || t === 'Claimed';
+                    });
+
+                if (campaigns.length === 0) {
+                    if (!pageLoaded) {
+                        done({ ok: false, exists: true, progress: null });
+                        return;
                     }
-                });
-                var fills = doc.querySelectorAll('[data-a-target="tw-progress-bar-animation"]');
-                var progressValues = [];
-                fills.forEach(function(fill) {
-                    var bar = fill.parentElement;
-                    var val = bar ? bar.getAttribute('aria-valuenow') : null;
-                    if (val !== null) progressValues.push(val);
-                });
+                    // Inventory genuinely rendered with nothing in progress
+                    saveInventorySnapshot(campaigns);
+                    done({ ok: true, exists: false, progress: null, found: false });
+                    return;
+                }
+
+                saveInventorySnapshot(campaigns);
+                var mine = campaigns.find(function(c) { return c.name === campaignName; });
+                if (!mine) {
+                    done({ ok: true, exists: false, progress: null, found: false });
+                    return;
+                }
+                // Fingerprint only this campaign's bars, so another campaign's progress can
+                // neither mask a stall nor fake movement when it drops off the list.
+                var progressValues = mine.drops.map(function(d) { return d.percent; })
+                    .filter(function(v) { return v !== null && v !== undefined; });
                 var progress = progressValues.length > 0 ? progressValues.join(",") : null;
                 popupText("Current Progress: " + progress);
-                done({ exists: found, progress: progress, found: found });
+                done({ ok: true, exists: true, progress: progress, found: true });
             } catch(e) {
-                done({ exists: true, progress: null });
+                done({ ok: false, exists: true, progress: null });
             }
         }
         var timeout = setTimeout(function() {
-            done({ exists: true, progress: null });
+            done({ ok: false, exists: true, progress: null });
         }, 20000);
         iframe.onload = function() {
             clearTimeout(timeout);
@@ -514,10 +625,12 @@ function addCampaignToTracker(gameName, campaignName, endDate) {
         tracker[gameName].push({
             name: campaignName,
             endDate: endDate,
-            completed: false
+            completed: false,
+            addedAt: Date.now()
         });
     } else {
         existing.endDate = endDate;
+        if (!existing.addedAt) existing.addedAt = Date.now();
     }
     setDropsTracker(tracker);
 }
@@ -531,6 +644,45 @@ function markCampaignCompleted(gameName, campaignName, completed) {
             setDropsTracker(tracker);
         }
     }
+}
+
+// A campaign that expires vanishes from Open Drop Campaigns, so it never reaches the
+// page-driven completion path in findNextFarmableCampaign and would sit in the tracker as
+// uncompleted forever, permanently answering "this game still has work" and bouncing the
+// farmer back to the campaigns page. Age them out on their end date instead.
+function sweepExpiredCampaigns() {
+    var tracker = getDropsTracker();
+    var swept = [];
+    Object.keys(tracker).forEach(function(gameName) {
+        if (!Array.isArray(tracker[gameName])) return;
+        tracker[gameName].forEach(function(c) {
+            if (c.completed) return;
+            // parseEndDateToMs has no year to work with, so anything more than ~180 days old
+            // reads as next year and would never expire. Age those out by when we first saw
+            // them instead, which also stops the tracker growing without bound.
+            var stale = c.addedAt && (Date.now() - c.addedAt) > 120 * 24 * 60 * 60 * 1000;
+            if (stale || calculateTimeRemaining(c.endDate) < -60) {
+                c.completed = true;
+                swept.push(gameName + " / " + c.name);
+            }
+        });
+    });
+    if (swept.length > 0) {
+        setDropsTracker(tracker);
+        popupText("Debug: Expired, marked completed: " + swept.join(", "));
+    }
+    return swept.length;
+}
+
+// Shared definition of "this game still has something to farm", used by both the campaigns
+// page pass and the priority check so the two can never disagree. Only campaigns actually
+// listed on the page count, which makes stale tracker entries structurally unable to
+// trigger a return trip.
+function pageCampaignsHaveWork(trackedCampaigns, pageCampaigns) {
+    return pageCampaigns.some(function(c) {
+        var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
+        return !t || !t.completed;
+    });
 }
 
 function areAllCampaignsCompleted(gameName) {
@@ -633,18 +785,52 @@ function calculateTimeRemaining(endDateString) {
     return Math.floor((ms - Date.now()) / 60000);
 }
 
-function openCampaignManager() {
-    if(document.getElementById("CampaignManagerWrapper")) {
-        document.getElementById("CampaignManagerWrapper").remove();
-        return;
-    }
-
-    if (!document.getElementById('atq-cm-style')) {
-        var style = document.createElement('style');
-        style.id = 'atq-cm-style';
-        style.textContent = `
-            #CampaignManagerWrapper, #CampaignManagerWrapper * { box-sizing: border-box; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+function injectAtqStyles() {
+    if (document.getElementById('atq-cm-style')) return;
+    var style = document.createElement('style');
+    style.id = 'atq-cm-style';
+    style.textContent = `
+            #CampaignManagerWrapper, #CampaignManagerWrapper *, #ProgressManagerWrapper, #ProgressManagerWrapper * { box-sizing: border-box; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
             #CampaignManagerWrapper { position:fixed; width:60rem; max-height:calc(100vh - 3rem); left:50%; top:50%; transform:translate(-50%,-50%); z-index:99999; display:flex; flex-direction:column; background:#18181b; padding:16px; border-radius:10px; box-shadow:0 12px 48px rgba(0,0,0,0.8); color:#efeff1; }
+
+            /* Progress Manager. Width AND height are both fixed so the panel never resizes
+               when an iframe loads, unloads, or renders at a different intrinsic size. */
+            #ProgressManagerWrapper { position:fixed; width:72rem; height:44rem; max-width:calc(100vw - 3rem); max-height:calc(100vh - 3rem); left:50%; top:50%; transform:translate(-50%,-50%); z-index:99999; display:flex; flex-direction:column; background:#18181b; padding:16px; border-radius:10px; box-shadow:0 12px 48px rgba(0,0,0,0.8); color:#efeff1; }
+            #ProgressManagerWrapper .atq-content { min-height:0; }
+
+            /* Launcher button: square with rounded corners, pinned top-left */
+            #ATQProgressLauncher { position:fixed; top:16px; left:16px; z-index:999990; width:38px; height:38px; border-radius:9px; border:1px solid #3a3a4a; background:#18181b; color:#9147ff; font-size:18px; font-weight:700; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 10px rgba(0,0,0,0.6); transition:background 0.12s, color 0.12s, border-color 0.12s; padding:0; }
+            #ATQProgressLauncher:hover { background:#2a2a35; color:#efeff1; border-color:#9147ff; }
+
+            /* Iframe host. Kept at a fixed size in both states so the pages inside always
+               lay out identically, and stashed off-screen rather than display:none so that
+               Twitch's virtualised towers keep rendering rows while hidden. */
+            .atq-iframe-host { position:fixed; width:1000px; height:560px; z-index:99998; border-radius:6px; overflow:hidden; background:#0e0e10; }
+            .atq-iframe-host.atq-host-stashed { left:-20000px !important; top:0 !important; visibility:hidden; pointer-events:none; }
+            .atq-frame { position:absolute; left:0; top:0; width:100%; height:100%; border:0; background:#0e0e10; visibility:hidden; }
+            .atq-frame.atq-frame-active { visibility:visible; }
+
+            .atq-framepane { position:relative; flex:1; min-height:0; background:#0e0e10; border-radius:6px; border:1px solid #2a2a35; overflow:hidden; }
+            .atq-framepane-msg { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; text-align:center; padding:1rem; color:#adadb8; font-size:0.92rem; }
+            .atq-countdown { font-size:2rem; font-weight:700; color:#9147ff; font-variant-numeric:tabular-nums; letter-spacing:0.02em; }
+            .atq-sub { font-size:0.82rem; color:#7a7a8c; }
+
+            .atq-bar { position:relative; height:6px; border-radius:3px; background:#2a2a35; overflow:hidden; margin-top:5px; }
+            .atq-bar-fill { position:absolute; left:0; top:0; height:100%; border-radius:3px; background:#9147ff; }
+            .atq-bar-fill.done { background:#00b37e; }
+            .atq-drop { display:block; background:#0e0e10; padding:7px 10px; border-radius:6px; border:1px solid transparent; }
+            .atq-drop-top { display:flex; align-items:baseline; gap:8px; }
+            .atq-drop-name { flex:1; font-size:0.92rem; color:#efeff1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+            .atq-drop-pct { font-size:0.88rem; font-weight:700; color:#9147ff; font-variant-numeric:tabular-nums; }
+            .atq-drop-pct.done { color:#00b37e; }
+            .atq-drop-req { font-size:0.78rem; color:#7a7a8c; }
+            .atq-kv { display:flex; gap:10px; background:#0e0e10; padding:5px 10px; border-radius:5px; align-items:baseline; }
+            .atq-kv-key { flex:0 0 17rem; font-size:0.8rem; color:#adadb8; font-family:ui-monospace,Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+            .atq-kv-val { flex:1; font-size:0.82rem; color:#efeff1; font-family:ui-monospace,Consolas,monospace; word-break:break-all; }
+            .atq-kv-val.unset { color:#5a5a6e; font-style:italic; }
+            .atq-log { background:#0e0e10; border:1px solid #2a2a35; border-radius:6px; padding:8px 10px; font-family:ui-monospace,Consolas,monospace; font-size:0.76rem; color:#adadb8; white-space:pre-wrap; word-break:break-word; line-height:1.5; }
+            .atq-note { font-size:0.8rem; color:#7a7a8c; padding:2px 4px 8px; }
+
             .atq-titlebar { display:flex; align-items:center; margin-bottom:12px; }
             .atq-title { font-size:1.05rem; font-weight:700; color:#efeff1; letter-spacing:0.04em; text-transform:uppercase; flex:1; }
             .atq-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
@@ -657,7 +843,9 @@ function openCampaignManager() {
             .atq-tab { padding:6px 16px; cursor:pointer; font-size:0.88rem; font-weight:700; color:#adadb8; border:none; background:none; border-bottom:2px solid transparent; margin-bottom:-1px; transition:color 0.15s, border-color 0.15s; letter-spacing:0.06em; text-transform:uppercase; }
             .atq-tab:hover { color:#efeff1; }
             .atq-tab.atq-active { color:#9147ff; border-bottom-color:#9147ff; }
-            .atq-content { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:3px; margin-bottom:8px; }
+            /* scrollbar-width/color is the Firefox form; the ::-webkit- rules below are
+               ignored there and cover Chromium instead. */
+            .atq-content { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:3px; margin-bottom:8px; scrollbar-width:thin; scrollbar-color:#3a3a4a transparent; }
             .atq-content::-webkit-scrollbar { width:4px; }
             .atq-content::-webkit-scrollbar-track { background:transparent; }
             .atq-content::-webkit-scrollbar-thumb { background:#3a3a4a; border-radius:2px; }
@@ -679,8 +867,24 @@ function openCampaignManager() {
             .atq-btn-icon { padding:4px 8px; font-size:0.82rem; min-width:28px; display:inline-flex; align-items:center; justify-content:center; }
             .atq-footer { display:flex; align-items:center; gap:6px; padding-top:10px; border-top:1px solid #2a2a35; }
         `;
-        document.head.appendChild(style);
+    document.head.appendChild(style);
+}
+
+function atqBtn(text, onClick, cls) {
+    var b = document.createElement('button');
+    b.textContent = text;
+    b.className = cls !== undefined ? cls : 'atq-btn';
+    b.addEventListener('click', onClick);
+    return b;
+}
+
+function openCampaignManager() {
+    if(document.getElementById("CampaignManagerWrapper")) {
+        document.getElementById("CampaignManagerWrapper").remove();
+        return;
     }
+
+    injectAtqStyles();
 
     function mkBtn(text, onClick, cls) {
         var b = document.createElement('button');
@@ -945,11 +1149,491 @@ function openCampaignManager() {
                 }
             }, 'atq-btn atq-btn-sm atq-btn-danger'));
         }
+        // Mirrors the Campaign Manager button in the Progress Manager's footer. Like Close,
+        // this drops any unsaved edits, so it sits next to it rather than near Save.
+        footer.appendChild(mkBtn('Progress Manager', function() {
+            outer.remove();
+            openProgressManager();
+        }, 'atq-btn atq-btn-sm'));
         footer.appendChild(mkBtn('Close', function() { outer.remove(); }, 'atq-btn'));
     }
 
     setTab('priority');
     document.body.prepend(outer);
+}
+
+function formatCountdown(ms) {
+    if (ms === null || isNaN(ms)) return "--:--";
+    if (ms < 0) ms = 0;
+    var total = Math.round(ms / 1000);
+    var m = Math.floor(total / 60);
+    var s = total % 60;
+    return m + ":" + ("0" + s).slice(-2);
+}
+
+function atqRelativeTime(ms) {
+    var secs = Math.round((Date.now() - ms) / 1000);
+    if (secs < 60) return secs + "s ago";
+    if (secs < 3600) return Math.floor(secs / 60) + "m ago";
+    return Math.floor(secs / 3600) + "h " + (Math.floor(secs / 60) % 60) + "m ago";
+}
+
+function openProgressManager() {
+    var existing = document.getElementById("ProgressManagerWrapper");
+    if (existing) { closeProgressManager(); return; }
+
+    injectAtqStyles();
+    getIframeHost();
+
+    var outer = document.createElement('div');
+    outer.id = 'ProgressManagerWrapper';
+
+    var titlebar = document.createElement('div');
+    titlebar.className = 'atq-titlebar';
+    var titleEl = document.createElement('span');
+    titleEl.className = 'atq-title';
+    titleEl.textContent = 'Progress Manager';
+    titlebar.appendChild(titleEl);
+    titlebar.appendChild(atqBtn('✕', closeProgressManager, 'atq-btn atq-btn-ghost'));
+    outer.appendChild(titlebar);
+
+    var tabsDiv = document.createElement('div');
+    tabsDiv.className = 'atq-tabs';
+    var tabDefs = [
+        { id: 'drops', label: 'Drops' },
+        { id: 'inventory', label: 'Inventory' },
+        { id: 'campaigns', label: 'Campaigns' },
+        { id: 'state', label: 'State' },
+        { id: 'debug', label: 'Debug' }
+    ];
+    var tabBtns = {};
+    tabDefs.forEach(function(t) {
+        tabBtns[t.id] = atqBtn(t.label, function() { setTab(t.id); }, 'atq-tab');
+        tabsDiv.appendChild(tabBtns[t.id]);
+    });
+    outer.appendChild(tabsDiv);
+
+    var contentArea = document.createElement('div');
+    contentArea.className = 'atq-content';
+    outer.appendChild(contentArea);
+
+    var footer = document.createElement('div');
+    footer.className = 'atq-footer';
+    outer.appendChild(footer);
+
+    var activeTab = 'drops';
+    var framePane = null;
+
+    function mkMsgPane(bigText, subLines) {
+        var pane = document.createElement('div');
+        pane.className = 'atq-framepane';
+        var msg = document.createElement('div');
+        msg.className = 'atq-framepane-msg';
+        var big = document.createElement('div');
+        big.className = 'atq-countdown';
+        big.textContent = bigText;
+        msg.appendChild(big);
+        (subLines || []).forEach(function(line) {
+            var s = document.createElement('div');
+            s.className = 'atq-sub';
+            s.textContent = line;
+            msg.appendChild(s);
+        });
+        pane.appendChild(msg);
+        return pane;
+    }
+
+    function renderDrops() {
+        var snap = getInventorySnapshot();
+        var farming = sessionStorage.getItem("farmingCampaignName");
+        var untilCheck = msUntilCheck("atqNextInventoryCheckAt");
+
+        var header = document.createElement('div');
+        header.className = 'atq-note';
+        if (untilCheck !== null) {
+            header.textContent = 'Next inventory check in ' + formatCountdown(untilCheck) +
+                (farming ? '  ·  farming: ' + farming : '');
+        } else {
+            header.textContent = 'No inventory check scheduled (auto-farm is not watching a stream).';
+        }
+        contentArea.appendChild(header);
+
+        if (!snap || snap.campaigns.length === 0) {
+            // Nothing captured yet, so show when the data will arrive rather than loading
+            // the page, exactly as the stored-data-only contract requires
+            contentArea.appendChild(mkMsgPane(
+                untilCheck !== null ? formatCountdown(untilCheck) : '--:--',
+                snap
+                    ? ['Inventory last read ' + atqRelativeTime(snap.takenAt) + ' with no drops in progress.']
+                    : ['No drop progress recorded yet.',
+                       untilCheck !== null ? 'Waiting for the next inventory check.' : 'Start auto-farming to populate this.']
+            ));
+            return;
+        }
+
+        var stamp = document.createElement('div');
+        stamp.className = 'atq-note';
+        stamp.textContent = 'Snapshot taken ' + atqRelativeTime(snap.takenAt) + '.';
+        contentArea.appendChild(stamp);
+
+        snap.campaigns.forEach(function(c) {
+            var gh = document.createElement('div');
+            gh.className = 'atq-game-header';
+            gh.textContent = c.name + (c.name === farming ? '  (farming)' : '');
+            contentArea.appendChild(gh);
+
+            if (c.endDate) {
+                var ed = document.createElement('div');
+                ed.className = 'atq-note';
+                ed.textContent = 'Ends ' + c.endDate;
+                contentArea.appendChild(ed);
+            }
+
+            c.drops.forEach(function(d) {
+                var pct = parseInt(d.percent);
+                if (isNaN(pct)) pct = 0;
+                var complete = pct >= 100;
+
+                var item = document.createElement('div');
+                item.className = 'atq-drop';
+
+                var top = document.createElement('div');
+                top.className = 'atq-drop-top';
+                var nm = document.createElement('span');
+                nm.className = 'atq-drop-name';
+                nm.textContent = d.name;
+                var pc = document.createElement('span');
+                pc.className = 'atq-drop-pct' + (complete ? ' done' : '');
+                pc.textContent = pct + '%';
+                top.appendChild(nm);
+                top.appendChild(pc);
+                item.appendChild(top);
+
+                if (d.requirement) {
+                    var req = document.createElement('div');
+                    req.className = 'atq-drop-req';
+                    req.textContent = d.requirement;
+                    item.appendChild(req);
+                }
+
+                var bar = document.createElement('div');
+                bar.className = 'atq-bar';
+                var fill = document.createElement('div');
+                fill.className = 'atq-bar-fill' + (complete ? ' done' : '');
+                fill.style.width = Math.min(100, pct) + '%';
+                bar.appendChild(fill);
+                item.appendChild(bar);
+
+                contentArea.appendChild(item);
+            });
+        });
+    }
+
+    function renderFrameTab(which) {
+        var frame = which === 'inventory' ? inventoryIframe : campaignsIframe;
+        var alive = !!(frame && frame.parentNode);
+        // Both frames are driven by the same inventory tick: the priority check that uses the
+        // campaigns frame runs from inside runInventoryCheck, so they share one countdown.
+        var untilCheck = msUntilCheck("atqNextInventoryCheckAt");
+
+        if (alive) {
+            // Placeholder only. The real iframe stays in the never-reparented host and is
+            // positioned over this box, so switching tabs never reloads the page.
+            framePane = document.createElement('div');
+            framePane.className = 'atq-framepane';
+            contentArea.appendChild(framePane);
+        } else {
+            framePane = null;
+            contentArea.appendChild(mkMsgPane(
+                untilCheck !== null ? formatCountdown(untilCheck) : '--:--',
+                untilCheck !== null
+                    ? ['The ' + which + ' page is loaded only while a check runs.',
+                       'It will appear here when the timer reaches zero.']
+                    : ['No check scheduled. Auto-farm is not watching a stream.',
+                       'Use "Load Now" to open the page here manually.']
+            ));
+        }
+        syncHost();
+    }
+
+    function renderState() {
+        var note = document.createElement('div');
+        note.className = 'atq-note';
+        note.textContent = 'Live view of every value the script drives itself from. Read-only.';
+        contentArea.appendChild(note);
+
+        function section(title) {
+            var h = document.createElement('div');
+            h.className = 'atq-game-header';
+            h.textContent = title;
+            contentArea.appendChild(h);
+        }
+        function kv(key, value) {
+            var row = document.createElement('div');
+            row.className = 'atq-kv';
+            var k = document.createElement('span');
+            k.className = 'atq-kv-key';
+            k.textContent = key;
+            var v = document.createElement('span');
+            var unset = value === null || value === undefined || value === '';
+            v.className = 'atq-kv-val' + (unset ? ' unset' : '');
+            v.textContent = unset ? '(not set)' : String(value);
+            row.appendChild(k);
+            row.appendChild(v);
+            contentArea.appendChild(row);
+        }
+
+        section('Farming session (sessionStorage)');
+        [
+            'AutoTwitchQueuerAutoFarmCampaigns', 'farmingGameName', 'farmingCampaignName',
+            'farmingGameIdx', 'farmingLinkIndex', 'farmingAllLinks', 'farmingSeenInInventory',
+            'farmingLastProgress', 'farmingNoProgressChecks', 'farmingStalledChecks',
+            'farmingMissingChecks', 'farmingIsStallFallback', 'farmingSkipCampaigns',
+            'farmingStallGameNames', 'farmingStallSameGame', 'fallbackChannelIndex'
+        ].forEach(function(k) { kv(k, sessionStorage.getItem(k)); });
+
+        section('Timers');
+        kv('inventoryCheckElapsedMinutes', sessionStorage.getItem('inventoryCheckElapsedMinutes'));
+        var invMs = msUntilCheck('atqNextInventoryCheckAt');
+        var offMs = msUntilCheck('atqNextOfflineCheckAt');
+        kv('next inventory check', invMs === null ? null : formatCountdown(invMs));
+        kv('next offline check', offMs === null ? null : formatCountdown(offMs));
+        kv('inventoryCheckInterval active', inventoryCheckInterval ? 'yes' : 'no');
+        kv('offlineCheckInterval active', offlineCheckInterval ? 'yes' : 'no');
+
+        section('Scheduler');
+        kv('scheduleStorage', sessionStorage.getItem('scheduleStorage'));
+        kv('storedCurrentTarget', sessionStorage.getItem('storedCurrentTarget'));
+        kv('twitchAboutLocation', sessionStorage.getItem('twitchAboutLocation'));
+        kv('twitchWatchedCategory', sessionStorage.getItem('twitchWatchedCategory'));
+
+        section('Iframes');
+        kv('inventoryIframe', inventoryIframe ? (inventoryIframe.parentNode ? 'alive' : 'detached') : 'null');
+        kv('campaignsIframe', campaignsIframe ? (campaignsIframe.parentNode ? 'alive' : 'detached') : 'null');
+        kv('iframeCheckGen', iframeCheckGen);
+        kv('iframeKillTimeout set', iframeKillTimeout ? 'yes' : 'no');
+        kv('streamViewerCountSeen', String(streamViewerCountSeen));
+
+        section('Stored settings (GM)');
+        var settings = getDropSettings();
+        Object.keys(settings).forEach(function(k) {
+            kv(k, Array.isArray(settings[k]) ? JSON.stringify(settings[k]) : settings[k]);
+        });
+        kv('debugLogging', String(debug));
+
+        section('Tracker (GM)');
+        var tracker = getDropsTracker();
+        var gameNames = Object.keys(tracker);
+        if (gameNames.length === 0) {
+            kv('dropsTracker', null);
+        } else {
+            gameNames.forEach(function(g) {
+                var done = tracker[g].filter(function(c) { return c.completed; }).length;
+                kv(g, done + ' / ' + tracker[g].length + ' completed');
+            });
+        }
+        var snap = getInventorySnapshot();
+        kv('dropProgressSnapshot', snap ? (snap.campaigns.length + ' campaign(s), ' + atqRelativeTime(snap.takenAt)) : null);
+        kv('dropGameList', getDropList().map(function(g) { return g.name; }).join(', '));
+    }
+
+    function renderDebug() {
+        var note = document.createElement('div');
+        note.className = 'atq-note';
+        note.textContent = 'Debug logging only controls whether "Debug:" messages are shown and logged. The actions below are always available.';
+        contentArea.appendChild(note);
+
+        var toggleRow = document.createElement('div');
+        toggleRow.className = 'atq-row';
+        toggleRow.appendChild(mkLabelEl('Debug logging:'));
+        var toggleBtn = atqBtn(debug ? 'ON' : 'OFF', function() {
+            setDebugLogging(!debug);
+            render();
+        }, 'atq-btn ' + (debug ? 'atq-btn-primary' : ''));
+        toggleRow.appendChild(toggleBtn);
+        contentArea.appendChild(toggleRow);
+
+        var actions = document.createElement('div');
+        actions.className = 'atq-row';
+        actions.style.marginTop = '8px';
+        [
+            ['Run Inventory Check', runInventoryCheck],
+            ['Run Offline Check', runOfflineCheck],
+            ['Run Priority Check', runPriorityCheck],
+            ['Cull Iframes', function() { debugCullIframes(); render(); }],
+            ['Sweep Expired', function() {
+                var n = sweepExpiredCampaigns();
+                popupText(n > 0 ? 'Marked ' + n + ' expired campaign(s) completed' : 'No expired campaigns found');
+            }]
+        ].forEach(function(pair) {
+            actions.appendChild(atqBtn(pair[0], pair[1], 'atq-btn atq-btn-sm'));
+        });
+        contentArea.appendChild(actions);
+
+        var logHeader = document.createElement('div');
+        logHeader.className = 'atq-game-header';
+        logHeader.textContent = 'Session log';
+        contentArea.appendChild(logHeader);
+
+        var log = document.createElement('div');
+        log.className = 'atq-log';
+        var raw = sessionStorage.getItem('ATQPermaLog');
+        log.textContent = raw ? raw.split(' /// ').reverse().join('\n') : 'Nothing logged this session.';
+        contentArea.appendChild(log);
+    }
+
+    function mkLabelEl(text) {
+        var s = document.createElement('span');
+        s.className = 'atq-label';
+        s.textContent = text;
+        return s;
+    }
+
+    // The host must sit exactly over the placeholder, and must be stashed whenever the
+    // active tab is not showing a frame, so it can never overlap the rest of the UI.
+    function syncHost() {
+        var host = getIframeHost();
+        var showing = null;
+        if (activeTab === 'inventory' && inventoryIframe && inventoryIframe.parentNode) showing = inventoryIframe;
+        if (activeTab === 'campaigns' && campaignsIframe && campaignsIframe.parentNode) showing = campaignsIframe;
+
+        Array.from(host.children).forEach(function(f) {
+            f.classList.toggle('atq-frame-active', f === showing);
+        });
+
+        if (!showing || !framePane || !document.getElementById('ProgressManagerWrapper')) {
+            host.classList.add('atq-host-stashed');
+            return;
+        }
+        var r = framePane.getBoundingClientRect();
+        host.classList.remove('atq-host-stashed');
+        host.style.left = r.left + 'px';
+        host.style.top = r.top + 'px';
+        host.style.width = r.width + 'px';
+        host.style.height = r.height + 'px';
+    }
+
+    function render() {
+        var scroll = contentArea.scrollTop;
+        contentArea.innerHTML = '';
+        framePane = null;
+        footer.innerHTML = '';
+
+        if (activeTab === 'drops') {
+            renderDrops();
+        } else if (activeTab === 'inventory' || activeTab === 'campaigns') {
+            renderFrameTab(activeTab);
+            footer.appendChild(atqBtn('Load Now', function() {
+                var f = activeTab === 'inventory' ? getInventoryIframe() : getCampaignsIframe();
+                f.src = activeTab === 'inventory'
+                    ? 'https://www.twitch.tv/drops/inventory'
+                    : 'https://www.twitch.tv/drops/campaigns';
+                render();
+            }, 'atq-btn atq-btn-sm'));
+            footer.appendChild(atqBtn('Unload', function() { killIframes(); render(); }, 'atq-btn atq-btn-sm'));
+        } else if (activeTab === 'state') {
+            renderState();
+        } else {
+            renderDebug();
+        }
+
+        footer.appendChild(atqBtn('Campaign Manager', function() {
+            closeProgressManager();
+            openCampaignManager();
+        }, 'atq-btn atq-btn-sm'));
+        footer.appendChild(atqBtn('Close', closeProgressManager, 'atq-btn'));
+
+        contentArea.scrollTop = scroll;
+        syncHost();
+    }
+
+    function setTab(tab) {
+        activeTab = tab;
+        Object.keys(tabBtns).forEach(function(id) {
+            tabBtns[id].classList.toggle('atq-active', id === tab);
+        });
+        render();
+    }
+
+    document.body.prepend(outer);
+    setTab('drops');
+
+    // One second is enough for countdowns and keeps the frame tabs cheap, since re-rendering
+    // only ever rebuilds the placeholder and never the iframe itself.
+    progressPanelTimer = setInterval(function() {
+        if (!document.getElementById('ProgressManagerWrapper')) { closeProgressManager(); return; }
+        render();
+    }, 1000);
+
+    // Geometry is tracked per frame rather than on resize alone, so the overlay stays glued
+    // to the placeholder through scrollbars, zoom changes, and Twitch's own layout shifts.
+    (function trackGeometry() {
+        if (!document.getElementById('ProgressManagerWrapper')) return;
+        syncHost();
+        progressPanelRAF = requestAnimationFrame(trackGeometry);
+    })();
+}
+
+function closeProgressManager() {
+    if (progressPanelTimer !== null) { clearInterval(progressPanelTimer); progressPanelTimer = null; }
+    if (progressPanelRAF !== null) { cancelAnimationFrame(progressPanelRAF); progressPanelRAF = null; }
+    var panel = document.getElementById('ProgressManagerWrapper');
+    if (panel) panel.remove();
+    if (iframeHost && iframeHost.parentNode) {
+        iframeHost.classList.add('atq-host-stashed');
+        Array.from(iframeHost.children).forEach(function(f) { f.classList.remove('atq-frame-active'); });
+    }
+}
+
+// Every mode in which the script is actively driving the page, not merely loaded on it.
+// Interval handles are checked for truthiness rather than against null because they are
+// declared with bare `var` and read as undefined until their initialiser runs.
+function isScriptActive() {
+    // Auto farm campaigns
+    if (sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") === "true") return true;
+    // A queue is scheduled or mid-run
+    if (sessionStorage.getItem("scheduleStorage") !== null) return true;
+    // Category watching (4/5) and the /about disruption loop (3/6)
+    if (sessionStorage.getItem("twitchWatchedCategory") !== null) return true;
+    if (sessionStorage.getItem("twitchAboutLocation") !== null) return true;
+    if (locationContains("?filter=drops&sort=VIEWER_COUNT")) return true;
+    // Farming checks running on a watched stream
+    if (inventoryCheckInterval || offlineCheckInterval) return true;
+    // Any AutoLiveWatcher loop that detectSite started
+    if (loopingInterval) return true;
+    return false;
+}
+
+// The launcher appears and disappears with that state, so polling drives it rather than a
+// one-shot build: detectSite only starts its loops 30s in, and auto-farm can be toggled at
+// any time. It also stays put while the panel is open so the panel can be closed from it.
+function syncProgressLauncher() {
+    var btn = document.getElementById('ATQProgressLauncher');
+    var wanted = isScriptActive() || !!document.getElementById('ProgressManagerWrapper');
+
+    if (!wanted) {
+        if (btn) btn.remove();
+        return;
+    }
+    if (btn) return;
+
+    injectAtqStyles();
+    btn = document.createElement('button');
+    btn.id = 'ATQProgressLauncher';
+    btn.type = 'button';
+    btn.textContent = '◧';
+    btn.title = 'Progress Manager';
+    btn.addEventListener('click', openProgressManager);
+    document.body.appendChild(btn);
+}
+
+function createProgressLauncher() {
+    if (launcherPollTimer === null) {
+        launcherPollTimer = setInterval(function() {
+            try { syncProgressLauncher(); } catch (e) { console.error("[ATQ] launcher sync failed", e); }
+        }, 2000);
+    }
+    syncProgressLauncher();
 }
 
 function findCampaignContainer(header) {
@@ -1213,6 +1897,7 @@ function farmNextPriority(list, idx) {
 }
 
 function parseAllCampaignsAndQueue(game, matchingRows, rewardRows, list, idx) {
+    sweepExpiredCampaigns();
     var campaigns = parseCampaignsFromRow(matchingRows);
     rewardRows.forEach(function(row) {
         campaigns.push(parseRewardCampaignFromRow(game, row));
@@ -1514,6 +2199,20 @@ function stopInventoryChecking() {
     inventoryCheckInterval = null;
     clearTimeout(offlineCheckInterval);
     offlineCheckInterval = null;
+    sessionStorage.removeItem("atqNextInventoryCheckAt");
+    sessionStorage.removeItem("atqNextOfflineCheckAt");
+}
+
+// Absolute wall-clock markers for when each check next fires, so the Progress Manager can
+// count down without owning or duplicating any of the scheduling
+function markNextCheck(key, msFromNow) {
+    sessionStorage.setItem(key, String(Date.now() + msFromNow));
+}
+
+function msUntilCheck(key) {
+    var at = parseInt(sessionStorage.getItem(key) || "0");
+    if (!at) return null;
+    return at - Date.now();
 }
 
 function checkCurrentStreamAlive() {
@@ -1609,6 +2308,12 @@ function runInventoryCheck() {
     checkInventoryForCampaign(campaignName, campaign.endDate).then(function(result) {
         var noProgressCheckLimit = getDropSettings().noProgressCheckLimit;
         var seenCampaign = sessionStorage.getItem("farmingSeenInInventory");
+        if (result.ok === false) {
+            // Iframe timed out, threw, or never rendered. That says nothing about the
+            // campaign, so leave every counter untouched and retry on the next tick.
+            popupText("Debug: Inventory check failed to read the page, skipping this tick");
+            return;
+        }
         if (result.found) {
             sessionStorage.setItem("farmingSeenInInventory", campaignName);
         }
@@ -1708,6 +2413,7 @@ function startInventoryChecking() {
     function offlineTick() {
         runOfflineCheck();
         if (offlineCheckInterval !== null) {
+            markNextCheck("atqNextOfflineCheckAt", offlineCheckMinutes * 60000);
             offlineCheckInterval = setTimeout(offlineTick, offlineCheckMinutes * 60000);
         }
     }
@@ -1716,15 +2422,20 @@ function startInventoryChecking() {
         var elapsed = parseInt(sessionStorage.getItem("inventoryCheckElapsedMinutes") || "0") + 1;
         if (elapsed >= checkIntervalMinutes) {
             sessionStorage.setItem("inventoryCheckElapsedMinutes", "0");
+            elapsed = 0;
             runInventoryCheck();
         } else {
             sessionStorage.setItem("inventoryCheckElapsedMinutes", String(elapsed));
         }
         if (inventoryCheckInterval !== null) {
+            markNextCheck("atqNextInventoryCheckAt", (checkIntervalMinutes - elapsed) * 60000);
             inventoryCheckInterval = setTimeout(iframeTick, 60000);
         }
     }
 
+    var startElapsed = parseInt(sessionStorage.getItem("inventoryCheckElapsedMinutes") || "0");
+    markNextCheck("atqNextOfflineCheckAt", offlineCheckMinutes * 60000);
+    markNextCheck("atqNextInventoryCheckAt", Math.max(1, checkIntervalMinutes - startElapsed) * 60000);
     offlineCheckInterval = setTimeout(offlineTick, offlineCheckMinutes * 60000);
     inventoryCheckInterval = setTimeout(iframeTick, 60000);
 }
@@ -1970,7 +2681,8 @@ function popupText(string) {
     var box = document.createElement("div");
     box.id = "userscriptPopupWindow";
     box.textContent = string;
-    box.style.cssText = "position:fixed; top:16px; left:16px; z-index:999991; max-width:300px; padding:10px 14px; background-color:#333; color:#fff; border-radius:6px; font-size:13px; line-height:1.5; word-wrap:break-word; white-space:normal; cursor:pointer; transform:translateX(calc(-100% - 16px)); transition:transform 0.35s ease; box-sizing:border-box;";
+    // Offset below the Progress Manager launcher so the two never overlap
+    box.style.cssText = "position:fixed; top:64px; left:16px; z-index:999991; max-width:300px; padding:10px 14px; background-color:#333; color:#fff; border-radius:6px; font-size:13px; line-height:1.5; word-wrap:break-word; white-space:normal; cursor:pointer; transform:translateX(calc(-100% - 16px)); transition:transform 0.35s ease; box-sizing:border-box;";
     document.body.appendChild(box);
     console.log("[ATQLogs] " + string);
     requestAnimationFrame(function () {
