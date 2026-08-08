@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      3.0.0
+// @version      3.1.0
 // @description  Queue a list of streams to open at specific times with automatic campaign farming. Also watch streams automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -731,11 +731,25 @@ function parseCampaignsFromRow(rowOrRows) {
     return campaigns;
 }
 
+function findRewardDateEl(row) {
+    // Styled-components hash classes churn across Twitch builds, so match the date div by
+    // its content shape (a leaf node shaped like "<start> - <end>") instead of a class name,
+    // the same way parseCampaignsFromRow matches drop campaign dates by content
+    var candidates = row.querySelectorAll('div,p');
+    for (var i = 0; i < candidates.length; i++) {
+        var el = candidates[i];
+        if (el.children.length > 0) continue;
+        var t = el.textContent.trim();
+        if (t.indexOf(' - ') !== -1 && /\d{1,2}:\d{2}\s*(AM|PM)/i.test(t)) return el;
+    }
+    return null;
+}
+
 function parseRewardCampaignFromRow(game, row) {
     // Reward campaign accordions have no per-drop <strong> names or dates like drop campaign
     // rows do, so the whole accordion becomes one campaign named after its first reward,
     // matching how it registers in the inventory page
-    var dateEl = row.querySelector('[class*="caYeGJ"]');
+    var dateEl = findRewardDateEl(row);
     var endDateRaw = dateEl ? dateEl.textContent.trim() : null;
     var endDate = endDateRaw ? parseEndDateFromRange(endDateRaw) : null;
     var rewardNames = [];
