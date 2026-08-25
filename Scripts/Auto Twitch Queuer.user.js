@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      3.1.0
+// @version      3.1.1
 // @description  Queue a list of streams to open at specific times with automatic campaign farming. Also watch streams automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -193,28 +193,39 @@ function expandRowsSequentially(rowsToExpand, onDone) {
         expandRowsSequentially(rest, onDone);
         return;
     }
-    try { r.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch(e) {}
+    expandRowAndWait(r, function() { expandRowsSequentially(rest, onDone); });
+}
+
+// Expands one campaign accordion and waits for its details to render. Rows live both in the page
+// and in the hidden campaigns iframe, either of which can sit in a background tab where mutations
+// stop arriving, so the wait needs the polling fallback rather than an observer alone.
+function expandRowAndWait(row, onDone) {
+    var finished = false;
+    var settleTimer = null;
+    function finish() {
+        if (finished) return;
+        finished = true;
+        clearTimeout(settleTimer);
+        onDone();
+    }
+    if (row.querySelector('.drop-details__label')) { finish(); return; }
+    try { row.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch(e) {}
     setTimeout(function() {
-        var accordionBtn = r.querySelector('button[aria-expanded]');
-        var parseTimer = null;
-        var detailObserver = new MutationObserver(function() {
-            if (!r.querySelector('.drop-details__label')) return;
-            clearTimeout(parseTimer);
-            clearTimeout(detailObserverTimeout);
-            parseTimer = setTimeout(function() {
-                detailObserver.disconnect();
-                expandRowsSequentially(rest, onDone);
-            }, 500);
-        });
-        detailObserver.observe(r, { childList: true, subtree: true });
-        var detailObserverTimeout = setTimeout(function() {
-            clearTimeout(parseTimer);
-            detailObserver.disconnect();
-            expandRowsSequentially(rest, onDone);
-        }, 10000);
+        var accordionBtn = row.querySelector('button[aria-expanded]');
         if (accordionBtn && accordionBtn.getAttribute('aria-expanded') !== 'true') {
             accordionBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
         }
+        waitForCondition(row, function(fromMutation) {
+            if (finished) return true;
+            if (!row.querySelector('.drop-details__label')) return false;
+            // Parse only once the details stop changing, as the original debounce did. Poll ticks
+            // must not restart the timer or it would never elapse in a throttled background tab.
+            if (settleTimer === null || fromMutation) {
+                clearTimeout(settleTimer);
+                settleTimer = setTimeout(finish, 500);
+            }
+            return false;
+        }, { timeoutMs: 10000, onTimeout: finish });
     }, 500);
 }
 
@@ -231,7 +242,15 @@ function checkForHigherPriorityCampaign() {
         var myGen = iframeCheckGen;
         function aborted() { return myGen !== iframeCheckGen; }
         var iframe = getCampaignsIframe();
-        function done(result) { killIframes(); resolve(result); }
+        var checkSettled = false;
+        function done(result) {
+            if (checkSettled) return;
+            checkSettled = true;
+            clearTimeout(timeout);
+            clearTimeout(watchdog);
+            killIframes();
+            resolve(result);
+        }
         function doCheck() {
             if (aborted()) { return; }
             try {
@@ -327,30 +346,7 @@ function checkForHigherPriorityCampaign() {
                         }
                         checkDropRowsSequentially(rows, rowIdx + 1, onDone);
                     }
-                    if (row.querySelector('.drop-details__label')) { afterExpand(); return; }
-                    try { row.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch(e) {}
-                    setTimeout(function() {
-                        var accordionBtn = row.querySelector('button[aria-expanded]');
-                        var parseTimer = null;
-                        var detailObserver = new MutationObserver(function() {
-                            if (!row.querySelector('.drop-details__label')) return;
-                            clearTimeout(parseTimer);
-                            clearTimeout(detailObserverTimeout);
-                            parseTimer = setTimeout(function() {
-                                detailObserver.disconnect();
-                                afterExpand();
-                            }, 500);
-                        });
-                        detailObserver.observe(row, { childList: true, subtree: true });
-                        var detailObserverTimeout = setTimeout(function() {
-                            clearTimeout(parseTimer);
-                            detailObserver.disconnect();
-                            afterExpand();
-                        }, 10000);
-                        if (accordionBtn && accordionBtn.getAttribute('aria-expanded') !== 'true') {
-                            accordionBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                        }
-                    }, 500);
+                    expandRowAndWait(row, afterExpand);
                 }
 
                 var allPriorityRewardRows = [];
@@ -422,30 +418,7 @@ function checkForHigherPriorityCampaign() {
                         }
                         checkRewardRowsSequentially(rows, rowIdx + 1, onDone);
                     }
-                    if (row.querySelector('.drop-details__label')) { afterExpand(); return; }
-                    try { row.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch(e) {}
-                    setTimeout(function() {
-                        var accordionBtn = row.querySelector('button[aria-expanded]');
-                        var parseTimer = null;
-                        var detailObserver = new MutationObserver(function() {
-                            if (!row.querySelector('.drop-details__label')) return;
-                            clearTimeout(parseTimer);
-                            clearTimeout(detailObserverTimeout);
-                            parseTimer = setTimeout(function() {
-                                detailObserver.disconnect();
-                                afterExpand();
-                            }, 500);
-                        });
-                        detailObserver.observe(row, { childList: true, subtree: true });
-                        var detailObserverTimeout = setTimeout(function() {
-                            clearTimeout(parseTimer);
-                            detailObserver.disconnect();
-                            afterExpand();
-                        }, 10000);
-                        if (accordionBtn && accordionBtn.getAttribute('aria-expanded') !== 'true') {
-                            accordionBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                        }
-                    }, 500);
+                    expandRowAndWait(row, afterExpand);
                 }
 
                 checkDropRowsSequentially(allPriorityDropRows, 0, function(dropFound) {
@@ -466,6 +439,13 @@ function checkForHigherPriorityCampaign() {
         var timeout = setTimeout(function() {
             done(false);
         }, 20000);
+        // Unlike the load guard above, this one is never cleared by onload: once the iframe loads
+        // nothing bounds the row walk, and a stalled walk would pin the farming loop forever.
+        var watchdog = setTimeout(function() {
+            if (aborted()) return;
+            popupText("Debug: Priority check watchdog fired, treating as no higher priority");
+            done(false);
+        }, 300000);
         iframe.onload = function() {
             clearTimeout(timeout);
             setTimeout(doCheck, 3000);
@@ -1673,30 +1653,42 @@ function findCampaignContainerAllSiblings(header) {
     return null;
 }
 
+// This is the only entry point for campaign page work, so it must not depend on a DOM mutation
+// arriving: a backgrounded tab stops mutating and the whole farming chain would wait for the tab
+// to be focused. waitForCondition adds the synchronous first attempt and the polling fallback.
 function injectDropButtons() {
-    var observer = new MutationObserver(function() {
+    var injected = false;
+    function tryInject() {
+        if (injected) return true;
         var dropHeader = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Drop Campaigns");
-        if(!dropHeader) return;
+        if(!dropHeader) return false;
         var campaignContainer = findCampaignContainer(dropHeader);
-        if(!campaignContainer) return;
-        observer.disconnect();
+        if(!campaignContainer) return false;
+        // Commit before running the chain below, where the original disconnected its observer:
+        // autoFarmCampaigns is not safe to enter twice, so a throw must not leave it retryable.
+        injected = true;
         var rewardHeader = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Reward Campaigns");
         if (rewardHeader) {
             var rewardContainer = findCampaignContainerAllSiblings(rewardHeader);
             if (rewardContainer) renderRewardButtons(rewardContainer);
         }
         renderDropButtons(campaignContainer);
-        renderClosedDropButtons();
-        var closedObserver = new MutationObserver(function() {
-            if (renderClosedDropButtons()) { clearTimeout(closedObserverTimeout); closedObserver.disconnect(); }
-        });
-        closedObserver.observe(document.body, { childList: true, subtree: true });
-        var closedObserverTimeout = setTimeout(function() { closedObserver.disconnect(); }, 15000);
+        if (!renderClosedDropButtons()) {
+            waitForCondition(document.body, renderClosedDropButtons, { timeoutMs: 15000 });
+        }
         if(sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") == "true" && window.location.pathname === "/drops/campaigns") {
             autoFarmCampaigns();
         }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+        return true;
+    }
+    function start() {
+        waitForCondition(document.body, tryInject, {
+            timeoutMs: 300000,
+            onTimeout: function() { popupText("Debug: Campaign list never rendered, gave up injecting drop buttons"); }
+        });
+    }
+    if (document.body) start();
+    else document.addEventListener('DOMContentLoaded', start);
 }
 
 function renderClosedDropButtons() {
@@ -3063,6 +3055,57 @@ function locationContains(string) {
     return window.location.toString().indexOf(string) != -1;
 }
 
+// Waits for the DOM to satisfy `predicate`, which must return true once it is satisfied.
+// A MutationObserver alone is not enough: Twitch's React app stops mutating the DOM while the
+// tab is hidden, so an observer-only wait never fires until the tab is focused again. Timers are
+// throttled in background tabs but never stopped, so the poll is the trigger that actually works
+// there. `settled` keeps exactly one of the four triggers winning, because callers like
+// farmNextPriority are not safe to enter twice.
+function waitForCondition(root, predicate, options) {
+    options = options || {};
+    var pollMs = options.pollMs || 1000;
+    var timeoutMs = options.timeoutMs || 0;
+    var onTimeout = options.onTimeout || null;
+    var settled = false;
+    var observer = null;
+    var pollTimer = null;
+    var deadline = null;
+
+    function cleanup() {
+        if (observer) { observer.disconnect(); observer = null; }
+        if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
+        if (deadline !== null) { clearTimeout(deadline); deadline = null; }
+    }
+
+    // fromMutation lets a predicate tell a real DOM change apart from a poll tick, which matters
+    // for the ones that debounce: resetting their timer on every tick would starve it.
+    function attempt(fromMutation) {
+        if (settled) return true;
+        var done = false;
+        try {
+            done = predicate(!!fromMutation);
+        } catch (e) {
+            console.error("[ATQ] waitForCondition predicate failed", e);
+        }
+        if (done) { settled = true; cleanup(); }
+        return settled;
+    }
+
+    if (attempt(false)) return;
+
+    observer = new MutationObserver(function() { attempt(true); });
+    observer.observe(root, { childList: true, subtree: true });
+    pollTimer = setInterval(function() { attempt(false); }, pollMs);
+    if (timeoutMs > 0) {
+        deadline = setTimeout(function() {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            if (onTimeout) onTimeout();
+        }, timeoutMs);
+    }
+}
+
 function waitForElm(selector) {
     popupText("ALWU: awaiting " + selector);
     return new Promise(resolve => {
@@ -3097,4 +3140,3 @@ GM_registerMenuCommand("Watch Category", () => {
     // Immediately refresh page to get script running
     cleanRedirect(dropsEnabledURL);
 });
-
