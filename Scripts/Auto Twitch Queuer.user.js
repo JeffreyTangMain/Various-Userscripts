@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Twitch Queuer
 // @namespace    https://github.com/
-// @version      3.1.1
+// @version      3.1.2
 // @description  Queue a list of streams to open at specific times with automatic campaign farming. Also watch streams automatically.
 // @author       Main
 // @match        https://www.youtube.com/*/streams
@@ -57,6 +57,17 @@ var campaignsIframe = null;
 var iframeKillTimeout = null;
 var iframeCheckGen = 0;
 var streamViewerCountSeen = false;
+// Twitch's player sometimes mounts without ever attaching a MediaSource, leaving a live
+// page whose video never plays. Drops only accrue while the video element is actually
+// playing, so that state has to be detected and recovered from rather than watched.
+var playbackWatchdogTimer = null;
+var playbackLastTime = null;
+var playbackLastAdvanceAt = 0;
+var playbackRecoveryStep = 0;
+var playbackWatchdogStartedAt = 0;
+// Sampling has to be frequent enough to tell a brief buffer apart from a real freeze
+var PLAYBACK_TICK_MS = 15000;
+var PLAYBACK_GRACE_MS = 30000;
 var iframeHost = null;
 var progressPanelTimer = null;
 var progressPanelRAF = null;
@@ -922,6 +933,8 @@ function openCampaignManager() {
     var offlineCheckInput = mkInput('number', settings.offlineCheckMinutes || 1, 'atq-input-num');
     var fallbackMinInput = mkInput('number', settings.fallbackMinutes || 30, 'atq-input-num');
     var noProgressInput = mkInput('number', settings.noProgressCheckLimit || 2, 'atq-input-num');
+    var playbackStallInput = mkInput('number', settings.playbackStallSeconds, 'atq-input-num');
+    var playbackReloadInput = mkInput('number', settings.playbackReloadLimit, 'atq-input-num');
 
     var tabsDiv = document.createElement('div');
     tabsDiv.className = 'atq-tabs';
@@ -950,7 +963,9 @@ function openCampaignManager() {
             offlineCheckMinutes: parseInt(offlineCheckInput.value) || 1,
             fallbackChannels: fallbackChannels,
             fallbackMinutes: parseInt(fallbackMinInput.value) || 30,
-            noProgressCheckLimit: parseInt(noProgressInput.value) || 2
+            noProgressCheckLimit: parseInt(noProgressInput.value) || 2,
+            playbackStallSeconds: parseInt(playbackStallInput.value) || 45,
+            playbackReloadLimit: isNaN(parseInt(playbackReloadInput.value)) ? 2 : parseInt(playbackReloadInput.value)
         });
         setDropsTracker(localTracker);
         popupText('Settings saved');
@@ -1104,6 +1119,8 @@ function openCampaignManager() {
         settingRow('Offline Check Minutes:', offlineCheckInput);
         settingRow('Fallback Duration:', fallbackMinInput, 'min');
         settingRow('No Progress Check Limit:', noProgressInput, 'checks');
+        settingRow('Playback Stall Seconds:', playbackStallInput, 'sec');
+        settingRow('Playback Reload Limit:', playbackReloadInput, 'reloads');
     }
 
     function setTab(tab) {
@@ -1392,8 +1409,22 @@ function openProgressManager() {
         var offMs = msUntilCheck('atqNextOfflineCheckAt');
         kv('next inventory check', invMs === null ? null : formatCountdown(invMs));
         kv('next offline check', offMs === null ? null : formatCountdown(offMs));
+        var playMs = msUntilCheck('atqNextPlaybackCheckAt');
+        kv('next playback check', playMs === null ? null : formatCountdown(playMs));
         kv('inventoryCheckInterval active', inventoryCheckInterval ? 'yes' : 'no');
         kv('offlineCheckInterval active', offlineCheckInterval ? 'yes' : 'no');
+        kv('playbackWatchdogTimer active', playbackWatchdogTimer ? 'yes' : 'no');
+
+        section('Playback');
+        var pv = getPlayerVideo();
+        kv('playback state', getPlaybackState());
+        kv('data-a-player-state', getPlayerStateAttr());
+        kv('video element', pv ? 'found' : null);
+        kv('video source', pv && (pv.currentSrc || pv.src) ? 'attached' : 'none');
+        kv('currentTime', pv ? pv.currentTime.toFixed(1) : null);
+        kv('since last advance', playbackLastAdvanceAt ? Math.round((Date.now() - playbackLastAdvanceAt) / 1000) + 's' : null);
+        kv('playbackRecoveryStep', playbackRecoveryStep);
+        kv('reloads used', playbackReloadsUsed() + ' / ' + getDropSettings().playbackReloadLimit);
 
         section('Scheduler');
         kv('scheduleStorage', sessionStorage.getItem('scheduleStorage'));
@@ -1454,6 +1485,8 @@ function openProgressManager() {
             ['Run Inventory Check', runInventoryCheck],
             ['Run Offline Check', runOfflineCheck],
             ['Run Priority Check', runPriorityCheck],
+            ['Check Playback', function() { popupText('Playback: ' + getPlaybackState()); }],
+            ['Force Playback Recovery', attemptPlaybackRecovery],
             ['Cull Iframes', function() { debugCullIframes(); render(); }],
             ['Sweep Expired', function() {
                 var n = sweepExpiredCampaigns();
@@ -1792,7 +1825,9 @@ function getDropSettings() {
         offlineCheckMinutes: s.offlineCheckMinutes || 1,
         fallbackChannels: s.fallbackChannels,
         fallbackMinutes: s.fallbackMinutes || 30,
-        noProgressCheckLimit: s.noProgressCheckLimit || 2
+        noProgressCheckLimit: s.noProgressCheckLimit || 2,
+        playbackStallSeconds: s.playbackStallSeconds || 45,
+        playbackReloadLimit: s.playbackReloadLimit === 0 ? 0 : (s.playbackReloadLimit || 2)
     };
 }
 
@@ -2201,6 +2236,7 @@ function tryNextAvailableLink(gameName, campaignName) {
 }
 
 function stopInventoryChecking() {
+    stopPlaybackWatchdog();
     clearTimeout(inventoryCheckInterval);
     inventoryCheckInterval = null;
     clearTimeout(offlineCheckInterval);
@@ -2242,6 +2278,176 @@ function checkCurrentStreamAlive() {
     }
 
     return true;
+}
+
+// The site player, not any other video on the page: a channel page can carry a second
+// <video> for clips or ads, and sampling the wrong one reports playback that isn't the stream.
+function getPlayerVideo() {
+    return document.querySelector('[data-a-target="video-player"] video')
+        || document.querySelector('.persistent-player video');
+}
+
+function getPlayerStateAttr() {
+    var btn = document.querySelector('[data-a-target="player-play-pause-button"]');
+    return btn ? btn.getAttribute('data-a-player-state') : null;
+}
+
+// "playing" | "stalled" | "unknown". Unknown means the player hasn't mounted yet and must
+// never be acted on, or a page that is merely slow would be reloaded out from under itself.
+function getPlaybackState() {
+    var video = getPlayerVideo();
+    if (!video) return "unknown";
+
+    // A player that failed to initialise never attaches a MediaSource, so the element has
+    // no source at all. This is the signature of the frozen page.
+    if (!video.currentSrc && !video.src) return "stalled";
+
+    if (video.paused || getPlayerStateAttr() === "paused") return "stalled";
+
+    // A player can also claim to be playing while frozen mid-buffer, which only shows up as
+    // currentTime refusing to advance between samples.
+    var now = Date.now();
+    var t = video.currentTime;
+    if (playbackLastTime === null || t !== playbackLastTime) {
+        playbackLastTime = t;
+        playbackLastAdvanceAt = now;
+        return "playing";
+    }
+    var stallMs = (getDropSettings().playbackStallSeconds || 45) * 1000;
+    if (now - playbackLastAdvanceAt >= stallMs) return "stalled";
+    return "playing";
+}
+
+function playbackReloadsUsed() {
+    if (sessionStorage.getItem("atqPlaybackReloadUrl") !== window.location.href) return 0;
+    return parseInt(sessionStorage.getItem("atqPlaybackReloads") || "0");
+}
+
+function clearPlaybackReloads() {
+    sessionStorage.removeItem("atqPlaybackReloads");
+    sessionStorage.removeItem("atqPlaybackReloadUrl");
+}
+
+// One rung per tick, escalating. Rungs 1-2 reuse the selectors already proven in the legacy
+// twitchCheckDisruptions loop. Rungs 3-4 are best effort only: a synthetic click carries no
+// user activation in Firefox, so if Twitch's play path demands a real gesture they do
+// nothing, which is why the reload rung exists and is reached within about a minute.
+function attemptPlaybackRecovery() {
+    var settings = getDropSettings();
+    var step = playbackRecoveryStep;
+    playbackRecoveryStep++;
+
+    if (step === 0) {
+        var gate = document.querySelector('[data-a-target="content-classification-gate-overlay-start-watching-button"]')
+            || document.querySelector('[data-a-target="player-overlay-mature-accept"]');
+        if (gate) {
+            popupText("Playback: clicking content gate");
+            gate.click();
+            return;
+        }
+        step = 1;
+        playbackRecoveryStep = 2;
+    }
+
+    if (step === 1) {
+        var reloadPlayer = $("div[data-a-target='tw-core-button-label-text']:contains('Reload Player')");
+        if (reloadPlayer.length > 0) {
+            popupText("Playback: clicking Reload Player");
+            reloadPlayer[0].click();
+            return;
+        }
+        step = 2;
+        playbackRecoveryStep = 3;
+    }
+
+    if (step === 2) {
+        popupText("Playback: stalled, trying to start the player");
+        var video = getPlayerVideo();
+        if (video && (video.currentSrc || video.src)) {
+            try {
+                var played = video.play();
+                if (played && played.catch) played.catch(function() {});
+            } catch (e) {
+                console.error("[ATQ] video.play() failed", e);
+            }
+        }
+        var playBtn = document.querySelector('[data-a-target="player-play-pause-button"][data-a-player-state="paused"]');
+        if (playBtn) playBtn.click();
+        return;
+    }
+
+    if (step === 3) {
+        // The overlay is what a person hits when they click the stream by hand, and it is a
+        // different code path from the control bar button.
+        var overlay = document.querySelector('[data-a-target="player-overlay-click-handler"]');
+        if (overlay) {
+            popupText("Playback: clicking the player overlay");
+            overlay.click();
+        }
+        return;
+    }
+
+    var used = playbackReloadsUsed();
+    if (used < settings.playbackReloadLimit) {
+        sessionStorage.setItem("atqPlaybackReloadUrl", window.location.href);
+        sessionStorage.setItem("atqPlaybackReloads", String(used + 1));
+        popupText("Playback: player never started, reloading page (" + (used + 1) + "/" + settings.playbackReloadLimit + ")");
+        cleanRedirect(window.location.href);
+        return;
+    }
+
+    // Out of options on this page, so treat it exactly like an offline stream.
+    var gn = sessionStorage.getItem("farmingGameName");
+    var cn = sessionStorage.getItem("farmingCampaignName");
+    clearPlaybackReloads();
+    stopInventoryChecking();
+    if (!gn || !cn) {
+        popupText("Playback: player never started and no farming session to advance");
+        return;
+    }
+    if (gn === "__fallback__") {
+        popupText("Playback: player never started, trying next fallback");
+        tryNextFallbackChannel();
+    } else {
+        popupText("Playback: player never started, trying next link");
+        tryNextAvailableLink(gn, cn);
+    }
+}
+
+function startPlaybackWatchdog() {
+    stopPlaybackWatchdog();
+    playbackLastTime = null;
+    playbackLastAdvanceAt = Date.now();
+    playbackRecoveryStep = 0;
+    playbackWatchdogStartedAt = Date.now();
+
+    function tick() {
+        var state = getPlaybackState();
+        // The grace period covers a slow-mounting player, which would otherwise be reloaded
+        // before it ever had a chance to attach its source.
+        if (Date.now() - playbackWatchdogStartedAt < PLAYBACK_GRACE_MS) {
+            state = "unknown";
+        }
+        if (state === "playing") {
+            playbackRecoveryStep = 0;
+            clearPlaybackReloads();
+        } else if (state === "stalled") {
+            attemptPlaybackRecovery();
+        }
+        if (playbackWatchdogTimer !== null) {
+            markNextCheck("atqNextPlaybackCheckAt", PLAYBACK_TICK_MS);
+            playbackWatchdogTimer = setTimeout(tick, PLAYBACK_TICK_MS);
+        }
+    }
+
+    markNextCheck("atqNextPlaybackCheckAt", PLAYBACK_TICK_MS);
+    playbackWatchdogTimer = setTimeout(tick, PLAYBACK_TICK_MS);
+}
+
+function stopPlaybackWatchdog() {
+    clearTimeout(playbackWatchdogTimer);
+    playbackWatchdogTimer = null;
+    sessionStorage.removeItem("atqNextPlaybackCheckAt");
 }
 
 function runOfflineCheck() {
@@ -2415,6 +2621,7 @@ function startInventoryChecking() {
     var campaignName = sessionStorage.getItem("farmingCampaignName");
     if (!gameName || !campaignName) return;
     popupText("Starting checks - offline: " + offlineCheckMinutes + " min, inventory: " + checkIntervalMinutes + " min");
+    startPlaybackWatchdog();
 
     function offlineTick() {
         runOfflineCheck();
