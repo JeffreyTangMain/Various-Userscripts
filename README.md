@@ -9,6 +9,8 @@ Faceit Watcher: Watches Faceit Live, claiming drops if available. Untested.
 
 Hide Expired Twitch Drops: Hides the expired Twitch drops by making their display CSS into none, shouldn't interfere with any scripts that need to interact with them in the background.
 
+Keep Tab Awake: Generate a near-silent tone to prevent Firefox throttling background tabs, mainly for idle games.
+
 LoL Esports Redirector: Automatically sends you to the live page for lolesports.com and will refresh if drops aren't working.
 
 YouTube Shorts to Videos: Redirects YouTube shorts to proper watch links instantly.
