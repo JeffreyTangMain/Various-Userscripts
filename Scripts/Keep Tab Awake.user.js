@@ -11,7 +11,7 @@
 // ==/UserScript==
 
 (() => {
-  const FREQ = 30;
+  const FREQ = 40;
   let gainValue = GM_getValue('gain', 0.001);
   let ctx = null, gainNode = null, menuIds = [];
 
