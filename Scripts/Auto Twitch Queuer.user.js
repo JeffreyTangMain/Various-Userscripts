@@ -16,9 +16,7 @@
 // Documenting globals for JSHint to not throw an error for JQuery's $ function
 /* globals $ */
 
-// Menu registration runs first so that nothing below can stop the menu from appearing.
-// The debug entries are gone on purpose; every debug action lives in the Progress
-// Manager's Debug tab now.
+// Menu registration runs first so nothing below can stop the menu from appearing
 GM_registerMenuCommand("Open Schedule", grabSchedule);
 GM_registerMenuCommand("Next In Queue", nextinQueue);
 GM_registerMenuCommand("Cancel Schedule", cancelQueue);
@@ -26,8 +24,7 @@ GM_registerMenuCommand("Auto Farm Campaigns", autoFarmCampaignsToggle);
 GM_registerMenuCommand("Campaign Manager", openCampaignManager);
 GM_registerMenuCommand("Progress Manager", openProgressManager);
 
-// Debug now only gates whether "Debug:" lines get printed/logged. Every debug action
-// lives in the Progress Manager's Debug tab instead of the userscript menu.
+// Only gates whether "Debug:" lines are shown; debug actions are in the Progress Manager
 var debug = false;
 try {
     debug = GM_getValue('debugLogging', false);
@@ -57,9 +54,7 @@ var campaignsIframe = null;
 var iframeKillTimeout = null;
 var iframeCheckGen = 0;
 var streamViewerCountSeen = false;
-// Twitch's player sometimes mounts without ever attaching a MediaSource, leaving a live
-// page whose video never plays. Drops only accrue while the video element is actually
-// playing, so that state has to be detected and recovered from rather than watched.
+// Detects a player that mounted but never plays, since drops only accrue while it plays
 var playbackWatchdogTimer = null;
 var playbackLastTime = null;
 var playbackLastAdvanceAt = 0;
@@ -73,6 +68,10 @@ var progressPanelTimer = null;
 var progressPanelRAF = null;
 var launcherPollTimer = null;
 var campaignsPageInventory = null;
+// Started as soon as the campaigns page renders so the inventory loads while rows expand
+var campaignsInventoryPromise = null;
+var campaignsWatchdogTimer = null;
+var campaignsRetryPending = false;
 
 var sessionStorageNull = sessionStorage.getItem('scheduleStorage') == null;
 
@@ -88,8 +87,7 @@ if(window.location.pathname === "/drops/campaigns") {
     injectDropButtons();
 }
 
-// Purely cosmetic chrome, so it goes last and swallows its own errors. It must never be
-// able to prevent injectDropButtons or the auto-farm resume below from running.
+// Cosmetic, so it swallows its own errors and can't block the auto-farm resume below
 try {
     if (document.body) {
         createProgressLauncher();
@@ -112,9 +110,7 @@ if (sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") == "true" &&
     }, 3000);
 }
 
-// The iframes live in one host element that is created once and NEVER reparented, because
-// moving an iframe in the DOM forces it to reload. The Progress Manager shows them by
-// positioning this host over its content area, not by adopting the nodes.
+// One host for both iframes, never reparented, since moving an iframe reloads it
 function getIframeHost() {
     if (iframeHost && iframeHost.parentNode) return iframeHost;
     injectAtqStyles();
@@ -175,9 +171,16 @@ function scheduleIframeKill() {
     popupText("Debug: Iframe kill scheduled in " + minutes + " min");
 }
 
+// A fresh frame is already navigating, so src is only reassigned on reuse
+function navigateIframe(frame, src) {
+    if (frame.atqFresh) { frame.atqFresh = false; return; }
+    frame.src = src;
+}
+
 function getInventoryIframe() {
     if (!inventoryIframe || !inventoryIframe.parentNode) {
         inventoryIframe = createHiddenIframe('https://www.twitch.tv/drops/inventory');
+        inventoryIframe.atqFresh = true;
         popupText("Debug: Created inventoryIframe");
     } else {
         popupText("Debug: Reusing inventoryIframe");
@@ -189,6 +192,7 @@ function getInventoryIframe() {
 function getCampaignsIframe() {
     if (!campaignsIframe || !campaignsIframe.parentNode) {
         campaignsIframe = createHiddenIframe('https://www.twitch.tv/drops/campaigns');
+        campaignsIframe.atqFresh = true;
         popupText("Debug: Created campaignsIframe");
     } else {
         popupText("Debug: Reusing campaignsIframe");
@@ -197,30 +201,35 @@ function getCampaignsIframe() {
     return campaignsIframe;
 }
 
-function expandRowsSequentially(rowsToExpand, onDone) {
-    if (rowsToExpand.length === 0) { onDone(); return; }
+// onDone(failures): rows whose details never rendered, e.g. in a hidden tab
+function expandRowsSequentially(rowsToExpand, onDone, failures) {
+    failures = failures || 0;
+    if (rowsToExpand.length === 0) { onDone(failures); return; }
     var r = rowsToExpand[0];
     var rest = rowsToExpand.slice(1);
     if (r.querySelector('.drop-details__label')) {
-        expandRowsSequentially(rest, onDone);
+        expandRowsSequentially(rest, onDone, failures);
         return;
     }
-    expandRowAndWait(r, function() { expandRowsSequentially(rest, onDone); });
+    expandRowAndWait(r, function(ok) { expandRowsSequentially(rest, onDone, failures + (ok ? 0 : 1)); });
 }
 
-// Expands one campaign accordion and waits for its details to render. Rows live both in the page
-// and in the hidden campaigns iframe, either of which can sit in a background tab where mutations
-// stop arriving, so the wait needs the polling fallback rather than an observer alone.
+// Expands one accordion and waits for its details; polls too, for background tabs. onDone(ok)
 function expandRowAndWait(row, onDone) {
     var finished = false;
     var settleTimer = null;
-    function finish() {
+    var capTimer = null;
+    var startedAt = Date.now();
+    function finish(ok) {
         if (finished) return;
         finished = true;
         clearTimeout(settleTimer);
-        onDone();
+        clearTimeout(capTimer);
+        var p = row.querySelector('p');
+        popupText("Debug: Row expand " + (ok ? "ok" : "TIMEOUT") + " in " + (Date.now() - startedAt) + "ms (" + (p ? p.textContent.trim() : "?") + ", " + document.visibilityState + ")");
+        onDone(ok);
     }
-    if (row.querySelector('.drop-details__label')) { finish(); return; }
+    if (row.querySelector('.drop-details__label')) { finished = true; onDone(true); return; }
     try { row.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch(e) {}
     setTimeout(function() {
         var accordionBtn = row.querySelector('button[aria-expanded]');
@@ -230,24 +239,30 @@ function expandRowAndWait(row, onDone) {
         waitForCondition(row, function(fromMutation) {
             if (finished) return true;
             if (!row.querySelector('.drop-details__label')) return false;
-            // Parse only once the details stop changing, as the original debounce did. Poll ticks
-            // must not restart the timer or it would never elapse in a throttled background tab.
+            // Settle 500ms after the last mutation; poll ticks don't reset it or it never fires in background tabs
             if (settleTimer === null || fromMutation) {
                 clearTimeout(settleTimer);
-                settleTimer = setTimeout(finish, 500);
+                settleTimer = setTimeout(function() { finish(true); }, 500);
             }
+            // A row that keeps re-rendering would otherwise hold the settle open until the timeout
+            if (capTimer === null) capTimer = setTimeout(function() { finish(true); }, 1500);
             return false;
-        }, { timeoutMs: 10000, onTimeout: finish });
-    }, 500);
+        }, { timeoutMs: 10000, onTimeout: function() { finish(!!row.querySelector('.drop-details__label')); } });
+    }, 100);
 }
 
+// Resolves true when a higher priority game has work, "unlisted" when the campaign being farmed is no
+// longer listed under its game, and false otherwise
 function checkForHigherPriorityCampaign() {
     return new Promise(function(resolve) {
         var farmingIdx = parseInt(sessionStorage.getItem("farmingGameIdx") || "-1");
+        var currentGame = sessionStorage.getItem("farmingGameName");
+        var currentCampaign = sessionStorage.getItem("farmingCampaignName");
+        var verifyCurrent = !!(currentGame && currentCampaign && currentGame !== "__fallback__");
         popupText("Debug: Priority check - farmingIdx=" + farmingIdx);
-        if (farmingIdx <= 0) { popupText("Debug: farmingIdx<=0, skipping priority check"); resolve(false); return; }
+        if (farmingIdx <= 0 && !verifyCurrent) { popupText("Debug: farmingIdx<=0, skipping priority check"); resolve(false); return; }
         var list = getDropList();
-        var higherPriorityGames = list.slice(0, farmingIdx);
+        var higherPriorityGames = farmingIdx > 0 ? list.slice(0, farmingIdx) : [];
         var stalledGames = JSON.parse(sessionStorage.getItem("farmingStallGameNames") || "[]");
         var higherPriorityNames = higherPriorityGames.map(function(g) { return g.name; });
         popupText("Debug: Higher priority names: [" + higherPriorityNames.join(", ") + "] (stalled: [" + stalledGames.filter(function(g) { return higherPriorityNames.includes(g); }).join(", ") + "])");
@@ -267,143 +282,131 @@ function checkForHigherPriorityCampaign() {
             if (aborted()) { return; }
             try {
                 var doc = iframe.contentDocument || iframe.contentWindow.document;
-                if (!doc || !doc.body) { resolve(false); return; }
+                if (!doc || !doc.body) { done(false); return; }
                 sweepExpiredCampaigns();
                 var tracker = getDropsTracker();
                 var triggeringGame = null;
 
-                var dropSearchRoot = doc;
-                var openHeader = Array.from(doc.querySelectorAll('h4')).find(function(el) {
-                    return el.textContent.trim() === "Open Drop Campaigns";
-                });
-                if (openHeader) {
-                    var el = openHeader;
-                    while (el && el !== doc.body) {
-                        var sib = el.nextElementSibling;
-                        if (sib && sib.querySelector('button[aria-expanded]')) { dropSearchRoot = sib; break; }
-                        el = el.parentElement;
-                    }
-                }
+                var dropSearchRoot = findCampaignContainer(getOpenDropHeader(doc), doc) || doc;
                 popupText("Debug: Priority check scope=" + (dropSearchRoot === doc ? "full page" : "open drop campaigns only"));
 
-                var allVisibleGames = Array.from(dropSearchRoot.children).map(function(row) {
+                function rowGameName(row) {
                     var pEl = row.querySelector('p');
                     return pEl ? pEl.textContent.trim() : null;
-                }).filter(Boolean);
-                var rewardPriorityNames = [];
+                }
                 var allRewardRows = getRewardRows(doc);
-                allRewardRows.forEach(function(row) {
-                    var rewardGame = rewardRowGameName(row);
-                    if (!rewardGame) return;
-                    allVisibleGames.push(rewardGame + " (reward)");
-                    if (higherPriorityNames.includes(rewardGame)) rewardPriorityNames.push(rewardGame + " (reward)");
-                });
-                popupText("Debug: Games visible in iframe (" + allVisibleGames.length + "): [" + allVisibleGames.join(", ") + "]");
-
                 var allPriorityDropRows = Array.from(dropSearchRoot.children).filter(function(row) {
-                    var pEl = row.querySelector('p');
-                    return pEl && higherPriorityNames.includes(pEl.textContent.trim());
+                    return higherPriorityNames.includes(rowGameName(row));
                 });
-                var allPriorityLabels = allPriorityDropRows.filter(function(r) { return !r.querySelector('.drop-details__label'); }).map(function(r) { var p = r.querySelector('p'); return p ? p.textContent.trim() : '?'; }).concat(rewardPriorityNames);
-                popupText("Debug: Priority rows needing expansion (" + allPriorityLabels.length + "): [" + allPriorityLabels.join(", ") + "]");
-
-                function checkDropRowsSequentially(rows, rowIdx, onDone) {
-                    if (aborted()) { return; }
-                    if (rowIdx >= rows.length) { onDone(false); return; }
-                    var row = rows[rowIdx];
-                    var pEl = row.querySelector('p');
-                    var gameName = pEl ? pEl.textContent.trim() : null;
-                    if (!gameName) { checkDropRowsSequentially(rows, rowIdx + 1, onDone); return; }
-                    function afterExpand() {
-                        if (aborted()) { return; }
-                        var trackedCampaigns = tracker[gameName];
-                        var isStalled = stalledGames.includes(gameName);
-                        var pageCampaigns = parseCampaignsFromRow(row);
-                        if (isStalled) {
-                            var hasNew = pageCampaigns.some(function(c) {
-                                return !trackedCampaigns || !trackedCampaigns.find(function(t) { return t.name === c.name; });
-                            });
-                            var stalledSummary = pageCampaigns.length > 0
-                                ? pageCampaigns.map(function(c) {
-                                    var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
-                                    return c.name + (t ? (t.completed ? " [done]" : " [stalled]") : " [NEW]");
-                                }).join(", ")
-                                : "no campaigns read";
-                            popupText("Debug: Checking stalled " + gameName + " - " + stalledSummary);
-                            if (hasNew) { triggeringGame = gameName; onDone(true); return; }
-                        } else {
-                            var hasWork = pageCampaignsHaveWork(trackedCampaigns, pageCampaigns);
-                            var pageSummary = pageCampaigns.length > 0
-                                ? pageCampaigns.map(function(c) {
-                                    var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
-                                    return c.name + (t ? (t.completed ? " [done]" : " [pending]") : " [untracked]");
-                                }).join(", ")
-                                : "not expanded";
-                            popupText("Debug: Checking " + gameName + " - " + pageSummary);
-                            if (hasWork) { triggeringGame = gameName; onDone(true); return; }
-                        }
-                        checkDropRowsSequentially(rows, rowIdx + 1, onDone);
-                    }
-                    expandRowAndWait(row, afterExpand);
-                }
-
                 var allPriorityRewardRows = allRewardRows.filter(function(row) {
-                    var rewardGame = rewardRowGameName(row);
-                    return rewardGame && higherPriorityNames.includes(rewardGame);
+                    return higherPriorityNames.includes(rewardRowGameName(row));
                 });
+                if (debug) {
+                    var allVisibleGames = Array.from(dropSearchRoot.children).map(rowGameName).filter(Boolean);
+                    var rewardPriorityNames = [];
+                    allRewardRows.forEach(function(row) {
+                        var rewardGame = rewardRowGameName(row);
+                        if (!rewardGame) return;
+                        allVisibleGames.push(rewardGame + " (reward)");
+                        if (higherPriorityNames.includes(rewardGame)) rewardPriorityNames.push(rewardGame + " (reward)");
+                    });
+                    popupText("Debug: Games visible in iframe (" + allVisibleGames.length + "): [" + allVisibleGames.join(", ") + "]");
+                    var allPriorityLabels = allPriorityDropRows.filter(function(r) { return !r.querySelector('.drop-details__label'); })
+                        .map(function(r) { return rowGameName(r) || '?'; }).concat(rewardPriorityNames);
+                    popupText("Debug: Priority rows needing expansion (" + allPriorityLabels.length + "): [" + allPriorityLabels.join(", ") + "]");
+                }
 
-                function checkRewardRowsSequentially(rows, rowIdx, onDone) {
+                function summarize(pageCampaigns, trackedCampaigns, trackedLabel, emptyText) {
+                    if (pageCampaigns.length === 0) return emptyText;
+                    return pageCampaigns.map(function(c) {
+                        var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
+                        return c.name + (t ? (t.completed ? " [done]" : " [" + trackedLabel + "]") : (trackedLabel === "stalled" ? " [NEW]" : " [untracked]"));
+                    }).join(", ");
+                }
+
+                // Drop and reward rows differ only in name source and parser
+                function checkRowsSequentially(rows, rowIdx, getName, parse, kind, onDone) {
                     if (aborted()) { return; }
                     if (rowIdx >= rows.length) { onDone(false); return; }
                     var row = rows[rowIdx];
-                    var gameName = rewardRowGameName(row);
-                    if (!gameName) { checkRewardRowsSequentially(rows, rowIdx + 1, onDone); return; }
-                    function afterExpand() {
+                    var gameName = getName(row);
+                    if (!gameName) { checkRowsSequentially(rows, rowIdx + 1, getName, parse, kind, onDone); return; }
+                    expandRowAndWait(row, function() {
                         if (aborted()) { return; }
                         var trackedCampaigns = tracker[gameName];
-                        // Same parser as the farming side, so the campaign identity matches
-                        // what gets registered in the tracker (one campaign per accordion,
-                        // named after its first reward)
-                        var pageCampaigns = [parseRewardCampaignFromRow({ name: gameName }, row)];
-                        // Fallback contract: while farming a lower priority stream because this game stalled,
-                        // only return to it for a campaign we have never tracked (a genuinely new one),
-                        // never for the stalled campaigns we fell back from; otherwise the fallback
-                        // stream runs until its Fallback Duration time limit expires.
-                        var isStalled = stalledGames.includes(gameName);
-                        if (isStalled) {
+                        var pageCampaigns = parse(row, gameName);
+                        // A stalled game only pulls us back for a never-tracked campaign
+                        if (stalledGames.includes(gameName)) {
                             var hasNew = pageCampaigns.some(function(c) {
                                 return !trackedCampaigns || !trackedCampaigns.find(function(t) { return t.name === c.name; });
                             });
-                            var stalledSummary = pageCampaigns.map(function(c) {
-                                var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
-                                return c.name + (t ? (t.completed ? " [done]" : " [stalled]") : " [NEW]");
-                            }).join(", ");
-                            popupText("Debug: Checking stalled reward " + gameName + " - " + stalledSummary);
+                            popupText("Debug: Checking stalled " + kind + gameName + " - " + summarize(pageCampaigns, trackedCampaigns, "stalled", "no campaigns read"));
                             if (hasNew) { triggeringGame = gameName; onDone(true); return; }
                         } else {
                             var hasWork = pageCampaignsHaveWork(trackedCampaigns, pageCampaigns);
-                            var pageSummary = pageCampaigns.map(function(c) {
-                                var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
-                                return c.name + (t ? (t.completed ? " [done]" : " [pending]") : " [untracked]");
-                            }).join(", ");
-                            popupText("Debug: Checking reward " + gameName + " - " + pageSummary);
+                            popupText("Debug: Checking " + kind + gameName + " - " + summarize(pageCampaigns, trackedCampaigns, "pending", "not expanded"));
                             if (hasWork) { triggeringGame = gameName; onDone(true); return; }
                         }
-                        checkRewardRowsSequentially(rows, rowIdx + 1, onDone);
-                    }
-                    expandRowAndWait(row, afterExpand);
+                        checkRowsSequentially(rows, rowIdx + 1, getName, parse, kind, onDone);
+                    });
                 }
 
-                checkDropRowsSequentially(allPriorityDropRows, 0, function(dropFound) {
-                    if (dropFound) {
-                        popupText("Debug: Priority check result=true" + (triggeringGame ? " triggered by: " + triggeringGame : ""));
-                        done(true);
+                function parseDropRow(row) { return parseCampaignsFromRow(row); }
+                function parseRewardRow(row, gameName) { return [parseRewardCampaignFromRow({ name: gameName }, row)]; }
+
+                // The campaign being farmed must still be listed under its game; nothing else notices
+                // when it closes or was queued under the wrong game. Rows that never rendered prove
+                // nothing, and a late-rendering second campaign gets two re-reads before giving up.
+                function verifyCurrentCampaign(attempt, onDone) {
+                    if (aborted()) { return; }
+                    var root = findCampaignContainer(getOpenDropHeader(doc), doc);
+                    var rows = (root ? Array.from(root.children) : []).filter(function(r) { return rowGameName(r) === currentGame; })
+                        .map(function(r) { return { row: r, parse: parseDropRow }; })
+                        .concat(getRewardRows(doc).filter(function(r) { return rewardRowGameName(r) === currentGame; })
+                            .map(function(r) { return { row: r, parse: parseRewardRow }; }));
+                    if (rows.length === 0 && !getOpenDropHeader(doc)) { onDone(true); return; }
+                    var names = [];
+                    var renderFailed = false;
+                    (function next(i) {
+                        if (aborted()) { return; }
+                        if (i >= rows.length) {
+                            var listed = names.indexOf(currentCampaign) !== -1;
+                            popupText("Debug: Current campaign check - " + currentCampaign + " under " + currentGame + ": " + (listed ? "listed" : renderFailed ? "unreadable" : "missing") + " (attempt " + (attempt + 1) + ")");
+                            if (listed || renderFailed) { onDone(true); return; }
+                            if (attempt < 2) { setTimeout(function() { verifyCurrentCampaign(attempt + 1, onDone); }, 2000); return; }
+                            onDone(false);
+                            return;
+                        }
+                        expandRowAndWait(rows[i].row, function(ok) {
+                            if (!ok) renderFailed = true;
+                            rows[i].parse(rows[i].row, currentGame).forEach(function(c) { names.push(c.name); });
+                            next(i + 1);
+                        });
+                    })(0);
+                }
+
+                function checkHigherPriority() {
+                    checkRowsSequentially(allPriorityDropRows, 0, rowGameName, parseDropRow, "", function(dropFound) {
+                        if (dropFound) {
+                            popupText("Debug: Priority check result=true" + (triggeringGame ? " triggered by: " + triggeringGame : ""));
+                            done(true);
+                            return;
+                        }
+                        checkRowsSequentially(allPriorityRewardRows, 0, rewardRowGameName, parseRewardRow, "reward ", function(rewardFound) {
+                            popupText("Debug: Priority check result=" + rewardFound + (triggeringGame ? " triggered by: " + triggeringGame : ""));
+                            done(rewardFound);
+                        });
+                    });
+                }
+
+                if (!verifyCurrent) { checkHigherPriority(); return; }
+                verifyCurrentCampaign(0, function(stillListed) {
+                    if (!stillListed) {
+                        popupText(currentCampaign + " is no longer listed under " + currentGame + ". Returning to campaigns");
+                        done("unlisted");
                         return;
                     }
-                    checkRewardRowsSequentially(allPriorityRewardRows, 0, function(rewardFound) {
-                        popupText("Debug: Priority check result=" + rewardFound + (triggeringGame ? " triggered by: " + triggeringGame : ""));
-                        done(rewardFound);
-                    });
+                    checkHigherPriority();
                 });
             } catch(e) {
                 done(false);
@@ -412,8 +415,7 @@ function checkForHigherPriorityCampaign() {
         var timeout = setTimeout(function() {
             done(false);
         }, 20000);
-        // Unlike the load guard above, this one is never cleared by onload: once the iframe loads
-        // nothing bounds the row walk, and a stalled walk would pin the farming loop forever.
+        // Never cleared by onload, so a stuck row walk can't pin the farming loop
         var watchdog = setTimeout(function() {
             if (aborted()) return;
             popupText("Debug: Priority check watchdog fired, treating as no higher priority");
@@ -421,16 +423,25 @@ function checkForHigherPriorityCampaign() {
         }, 300000);
         iframe.onload = function() {
             clearTimeout(timeout);
-            setTimeout(doCheck, 3000);
+            var doc = null;
+            try { doc = iframe.contentDocument || iframe.contentWindow.document; } catch(e) {}
+            if (!doc || !doc.body) { doCheck(); return; }
+            // Start as soon as the campaign list has rendered instead of after a fixed delay
+            waitForCondition(doc.body, function() {
+                if (aborted()) return true;
+                var header = getOpenDropHeader(doc);
+                if (!header) return false;
+                var hasRows = !!findCampaignContainer(header, doc);
+                if (!hasRows && !/no Drops campaigns available/i.test(doc.body.textContent)) return false;
+                setTimeout(doCheck, 500);
+                return true;
+            }, { pollMs: 250, timeoutMs: 15000, onTimeout: doCheck });
         };
-        iframe.src = 'https://www.twitch.tv/drops/campaigns';
+        navigateIframe(iframe, 'https://www.twitch.tv/drops/campaigns');
     });
 }
 
-// The inventory page renders every in-progress campaign as a `.inventory-campaign-info`
-// block whose PARENT also holds that campaign's drop tower. The progress bars are siblings
-// of the info block, not descendants, so anything scoped to `.inventory-campaign-info`
-// itself finds nothing and anything scoped to the document finds every campaign's bars.
+// Progress bars are siblings of .inventory-campaign-info, so they're scoped to its parent
 function readInventorySnapshot(doc) {
     var campaigns = [];
     doc.querySelectorAll('.inventory-campaign-info').forEach(function(info) {
@@ -477,10 +488,7 @@ function readInventorySnapshot(doc) {
     return campaigns;
 }
 
-// Claimed drops and redeemed rewards live in their own sections below In Progress. Tiles are
-// picked by document position between the section headings, the same way getRewardRows scopes
-// the campaigns page, since the containers carry only hashed class names. Only the first page
-// of Claimed is rendered ("Load More" is never clicked), so this is what is visible, not history.
+// Claimed tiles are found by position between the section headings; only the first page is read
 function readClaimedAndRewards(doc) {
     var headings = Array.from(doc.querySelectorAll('h4,h5'));
     var claimedHeading = headings.find(function(h) { return h.textContent.trim() === 'Claimed'; });
@@ -523,29 +531,54 @@ function parseClaimAgeDays(text) {
     return null;
 }
 
-// Loads /drops/inventory in the hidden iframe and reads everything the completion logic needs.
-// ok:false means the read itself failed, which is not evidence about any campaign either way.
+// Farming only sees the inventory in the iframe, so earned drops are claimed here
+function claimEarnedDrops(doc) {
+    var buttons = [];
+    doc.querySelectorAll('[data-a-target="tw-core-button-label-text"]').forEach(function(label) {
+        if (label.textContent.trim() !== 'Claim Now') return;
+        var btn = label.closest('button');
+        if (btn && buttons.indexOf(btn) === -1) buttons.push(btn);
+    });
+    buttons.forEach(function(btn) { btn.click(); });
+    if (buttons.length > 0) popupText("Claimed " + buttons.length + " drop(s)");
+    return buttons.length;
+}
+
+// Reads /drops/inventory in the iframe. ok:false means the read failed, not that a campaign did
 function loadInventoryPage() {
     return new Promise(function(resolve) {
         var myGen = iframeCheckGen;
         function aborted() { return myGen !== iframeCheckGen; }
         var iframe = getInventoryIframe();
-        function done(result) { killIframes(); resolve(result); }
+        var startedAt = Date.now();
+        var settled = false;
+        function done(result) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            popupText("Debug: Inventory read " + (result.ok ? "ok" : "FAILED") + " in " + (Date.now() - startedAt) + "ms (" + document.visibilityState + ")");
+            // Once another check has taken over the iframe it is no longer ours to remove
+            if (!aborted()) killIframes();
+            resolve(result);
+        }
         var failed = { ok: false, campaigns: [], claimed: [], rewards: [] };
+        // Section headings always render, unlike Claimed tiles on an empty account
+        function isInventoryLoaded(doc) {
+            return !!doc.querySelector('.inventory-page') &&
+                Array.from(doc.querySelectorAll('h3,h4,h5')).some(function(h) {
+                    var t = h.textContent.trim();
+                    return t === 'Drops' || t === 'Claimed';
+                });
+        }
         function doCheck() {
+            if (settled) return;
             // Another check took over the iframe; still settle so no caller is left waiting
-            if (aborted()) { resolve(failed); return; }
+            if (aborted()) { done(failed); return; }
             try {
                 var doc = iframe.contentDocument || iframe.contentWindow.document;
                 if (!doc || !doc.body) { done(failed); return; }
-                // "Loaded" must not be inferred from the presence of claimed drops: an account
-                // with an empty Claimed section would look permanently unloaded. The section
-                // headings are always rendered.
-                var pageLoaded = !!doc.querySelector('.inventory-page') &&
-                    Array.from(doc.querySelectorAll('h3,h4,h5')).some(function(h) {
-                        var t = h.textContent.trim();
-                        return t === 'Drops' || t === 'Claimed';
-                    });
+                claimEarnedDrops(doc);
+                var pageLoaded = isInventoryLoaded(doc);
                 var campaigns = readInventorySnapshot(doc);
                 if (!pageLoaded && campaigns.length === 0) { done(failed); return; }
                 var extra = readClaimedAndRewards(doc);
@@ -555,22 +588,27 @@ function loadInventoryPage() {
                 done(failed);
             }
         }
+        // Covers the iframe never loading at all; the readiness wait below has its own bound
         var timeout = setTimeout(function() { done(failed); }, 20000);
         iframe.onload = function() {
             clearTimeout(timeout);
-            setTimeout(doCheck, 3000);
+            var doc = null;
+            try { doc = iframe.contentDocument || iframe.contentWindow.document; } catch(e) {}
+            if (!doc || !doc.body) { doCheck(); return; }
+            // In Progress tiles can trail the headings, so allow a short settle
+            waitForCondition(doc.body, function() {
+                if (settled) return true;
+                if (aborted()) { doCheck(); return true; }
+                if (!isInventoryLoaded(doc)) return false;
+                setTimeout(doCheck, 750);
+                return true;
+            }, { pollMs: 250, timeoutMs: 15000, onTimeout: doCheck });
         };
-        iframe.src = 'https://www.twitch.tv/drops/inventory';
+        navigateIframe(iframe, 'https://www.twitch.tv/drops/inventory');
     });
 }
 
-// The single definition of "campaign finished", fed by every inventory read:
-// - still In Progress: finished once every drop bar is at 100% (earned; nothing here claims
-//   drops, so an earned drop can sit unclaimed and never reach the Claimed section)
-// - not In Progress: finished once every known drop is visible under Claimed or Rewards.
-//   All drops rather than the last one, because In Progress doesn't order drops by watch time.
-// A claimed name only counts if it was claimed around or after the campaign started, so a drop
-// name reused across campaigns (e.g. an esports loot box) can't complete a newer campaign.
+// Campaign finished: every In Progress bar at 100%, or every watch drop under Claimed/Rewards (claimed after the campaign started)
 function applyInventoryToTracker(inv) {
     if (!inv || !inv.ok) return [];
     var tracker = getDropsTracker();
@@ -580,18 +618,23 @@ function applyInventoryToTracker(inv) {
         if (!Array.isArray(tracker[gameName])) return;
         tracker[gameName].forEach(function(c) {
             if (c.completed) return;
+            // Non-watch drops (e.g. sub drops) don't hold a campaign open
+            var nonWatch = Array.isArray(c.nonWatchDrops) ? c.nonWatchDrops : [];
+            function isWatchDrop(n) { return nonWatch.indexOf(n) === -1; }
             var live = inv.campaigns.find(function(ic) { return ic.name === c.name; });
             if (live) {
-                var liveNames = live.drops.map(function(d) { return d.name; }).filter(function(n) { return n && n !== 'Unnamed drop'; });
+                var liveDrops = live.drops.filter(function(d) { return isWatchDrop(d.name); });
+                var liveNames = liveDrops.map(function(d) { return d.name; }).filter(function(n) { return n && n !== 'Unnamed drop'; });
                 var merged = mergeDropNames(c.drops, liveNames);
                 if (merged.length !== (c.drops || []).length) { c.drops = merged; changed = true; }
-                var allEarned = live.drops.length > 0 && live.drops.every(function(d) { return parseInt(d.percent) >= 100; });
+                var allEarned = liveDrops.length > 0 && liveDrops.every(function(d) { return parseInt(d.percent) >= 100; });
                 if (allEarned) { c.completed = true; completed.push(gameName + " / " + c.name); changed = true; }
                 return;
             }
-            if (!Array.isArray(c.drops) || c.drops.length === 0) return;
+            var watchDrops = Array.isArray(c.drops) ? c.drops.filter(isWatchDrop) : [];
+            if (watchDrops.length === 0) return;
             var earliestClaimMs = c.startMs ? c.startMs - 2 * 24 * 60 * 60 * 1000 : null;
-            var allClaimed = c.drops.every(function(dropName) {
+            var allClaimed = watchDrops.every(function(dropName) {
                 if (inv.rewards.indexOf(dropName) !== -1) return true;
                 return inv.claimed.some(function(cl) {
                     if (cl.name !== dropName) return false;
@@ -628,8 +671,7 @@ function getInventorySnapshot() {
     return s;
 }
 
-// Fingerprint only this campaign's bars, so another campaign's progress can neither mask a
-// stall nor fake movement when it drops off the list.
+// Fingerprint of this campaign's bars only
 function campaignProgressFingerprint(liveCampaign) {
     var values = liveCampaign.drops.map(function(d) { return d.percent; })
         .filter(function(v) { return v !== null && v !== undefined; });
@@ -649,8 +691,7 @@ function setDropsTracker(tracker) {
     GM_setValue('dropsTracker', tracker);
 }
 
-// `extra` carries what the completion check needs: the campaign's drop names (matched against
-// the inventory's Claimed/Rewards sections) and its start time (to ignore older claims)
+// extra: drop names and start time, used by the completion check
 function addCampaignToTracker(gameName, campaignName, endDate, extra) {
     extra = extra || {};
     var tracker = getDropsTracker();
@@ -671,7 +712,16 @@ function addCampaignToTracker(gameName, campaignName, endDate, extra) {
         if (!existing.addedAt) existing.addedAt = Date.now();
     }
     if (extra.drops && extra.drops.length > 0) existing.drops = mergeDropNames(existing.drops, extra.drops);
+    if (extra.nonWatchDrops && extra.nonWatchDrops.length > 0) {
+        existing.nonWatchDrops = mergeDropNames(existing.nonWatchDrops, extra.nonWatchDrops);
+        // Entries recorded before drops were classified may still list the non-watch ones
+        if (Array.isArray(existing.drops)) {
+            existing.drops = existing.drops.filter(function(n) { return existing.nonWatchDrops.indexOf(n) === -1; });
+        }
+    }
     if (extra.startMs && extra.startMs !== Infinity) existing.startMs = extra.startMs;
+    // Reward campaigns never appear In Progress on the inventory page
+    if (extra.reward) existing.reward = true;
     setDropsTracker(tracker);
 }
 
@@ -686,10 +736,7 @@ function markCampaignCompleted(gameName, campaignName, completed) {
     }
 }
 
-// A campaign that expires vanishes from Open Drop Campaigns, so it never reaches the
-// page-driven completion path in findNextFarmableCampaign and would sit in the tracker as
-// uncompleted forever, permanently answering "this game still has work" and bouncing the
-// farmer back to the campaigns page. Age them out on their end date instead.
+// Expired campaigns leave the page and would stay uncompleted forever, so age them out
 function sweepExpiredCampaigns() {
     var tracker = getDropsTracker();
     var swept = [];
@@ -697,9 +744,7 @@ function sweepExpiredCampaigns() {
         if (!Array.isArray(tracker[gameName])) return;
         tracker[gameName].forEach(function(c) {
             if (c.completed) return;
-            // parseEndDateToMs has no year to work with, so anything more than ~180 days old
-            // reads as next year and would never expire. Age those out by when we first saw
-            // them instead, which also stops the tracker growing without bound.
+            // Dates have no year, so very old entries are aged out by when they were added
             var stale = c.addedAt && (Date.now() - c.addedAt) > 120 * 24 * 60 * 60 * 1000;
             if (stale || calculateTimeRemaining(c.endDate) < -60) {
                 c.completed = true;
@@ -714,10 +759,7 @@ function sweepExpiredCampaigns() {
     return swept.length;
 }
 
-// Shared definition of "this game still has something to farm", used by both the campaigns
-// page pass and the priority check so the two can never disagree. Only campaigns actually
-// listed on the page count, which makes stale tracker entries structurally unable to
-// trigger a return trip.
+// Shared by the campaigns pass and the priority check; only campaigns on the page count
 function pageCampaignsHaveWork(trackedCampaigns, pageCampaigns) {
     return pageCampaigns.some(function(c) {
         var t = trackedCampaigns && trackedCampaigns.find(function(t) { return t.name === c.name; });
@@ -765,9 +807,11 @@ function parseCampaignsFromRow(rowOrRows) {
             var endDate = parseEndDateFromRange(endDateRaw);
             if (campaignName && endDate) {
                 var block = findDropCampaignBlock([row], campaignName);
+                var classified = block ? classifyCampaignDrops(block) : { watch: [], other: [] };
                 campaigns.push({
                     name: campaignName, endDate: endDate, endDateRaw: endDateRaw,
-                    drops: block ? benefitNamesIn(block) : [],
+                    drops: classified.watch,
+                    nonWatchDrops: classified.other,
                     startMs: parseRangeStartMs(endDateRaw)
                 });
             }
@@ -776,8 +820,7 @@ function parseCampaignsFromRow(rowOrRows) {
     return campaigns;
 }
 
-// A drop campaign's details block is the nearest ancestor of its <strong> name that holds the
-// "How to Earn" label; rows can hold several campaigns, so scoping to the row isn't enough
+// Nearest ancestor of the campaign name holding its How to Earn label
 function findDropCampaignBlock(rows, campaignName) {
     for (var r = 0; r < rows.length; r++) {
         var nameEl = Array.from(rows[r].querySelectorAll('strong')).find(function(el) {
@@ -804,20 +847,39 @@ function benefitNamesIn(el) {
     return names;
 }
 
+// Splits rewards into watch and non-watch, e.g. "Watch for 1 hour and claim the reward <span>Name</span>"
+function classifyCampaignDrops(block) {
+    var watch = [];
+    var other = [];
+    var earnLabel = Array.from(block.querySelectorAll('.drop-details__label'))
+        .find(function(lbl) { return /how to earn/i.test(lbl.textContent); });
+    var ul = earnLabel ? earnLabel.parentElement.querySelector('ul') : null;
+    if (ul) {
+        ul.querySelectorAll('li').forEach(function(li) {
+            if (!/claim the reward/i.test(li.textContent)) return;
+            var spans = li.querySelectorAll('span');
+            var name = spans.length > 0 ? spans[spans.length - 1].textContent.trim() : '';
+            if (!name) return;
+            var list = /\bwatch\b/i.test(li.textContent) ? watch : other;
+            if (list.indexOf(name) === -1) list.push(name);
+        });
+    }
+    // Unknown layout: fall back to treating every reward as watch-earned
+    if (watch.length === 0 && other.length === 0) watch = benefitNamesIn(block);
+    return { watch: watch, other: other };
+}
+
 function parseRangeStartMs(rangeString) {
     if (!rangeString || rangeString.indexOf(' - ') === -1) return null;
     var ms = parseEndDateToMs(rangeString.split(' - ')[0].trim());
     if (ms === Infinity) return null;
-    // parseEndDateToMs rolls dates >180 days old into next year; an open campaign's start is
-    // never months ahead, so undo that roll for long-running campaigns
+    // Undo parseEndDateToMs's next-year roll for long-running campaigns
     if (ms > Date.now() + 30 * 24 * 60 * 60 * 1000) ms = new Date(ms).setFullYear(new Date(ms).getFullYear() - 1);
     return ms;
 }
 
 function findRewardDateEl(row) {
-    // Styled-components hash classes churn across Twitch builds, so match the date div by
-    // its content shape (a leaf node shaped like "<start> - <end>") instead of a class name,
-    // the same way parseCampaignsFromRow matches drop campaign dates by content
+    // Match the date leaf by its "<start> - <end>" shape, since class names churn
     var candidates = row.querySelectorAll('div,p');
     for (var i = 0; i < candidates.length; i++) {
         var el = candidates[i];
@@ -829,9 +891,7 @@ function findRewardDateEl(row) {
 }
 
 function parseRewardCampaignFromRow(game, row) {
-    // Reward campaign accordions have no per-drop <strong> names or dates like drop campaign
-    // rows do, so the whole accordion becomes one campaign named after its first reward,
-    // matching how it registers in the inventory page
+    // A reward accordion is one campaign, named after its first reward
     var dateEl = findRewardDateEl(row);
     var endDateRaw = dateEl ? dateEl.textContent.trim() : null;
     var endDate = endDateRaw ? parseEndDateFromRange(endDateRaw) : null;
@@ -849,7 +909,7 @@ function parseRewardCampaignFromRow(game, row) {
     }
     var name = rewardNames.length > 0 ? rewardNames[0] : (game.name + " Reward");
     return { name: name, endDate: endDate, endDateRaw: endDateRaw, rewardRow: row,
-        drops: rewardNames, startMs: parseRangeStartMs(endDateRaw) };
+        drops: rewardNames, startMs: parseRangeStartMs(endDateRaw), reward: true };
 }
 
 function parseEndDateToMs(endDateString) {
@@ -973,6 +1033,13 @@ function atqBtn(text, onClick, cls) {
     return b;
 }
 
+function atqLabel(text) {
+    var s = document.createElement('span');
+    s.className = 'atq-label';
+    s.textContent = text;
+    return s;
+}
+
 function openCampaignManager() {
     if(document.getElementById("CampaignManagerWrapper")) {
         document.getElementById("CampaignManagerWrapper").remove();
@@ -981,13 +1048,6 @@ function openCampaignManager() {
 
     injectAtqStyles();
 
-    function mkBtn(text, onClick, cls) {
-        var b = document.createElement('button');
-        b.textContent = text;
-        b.className = cls !== undefined ? cls : 'atq-btn';
-        b.addEventListener('click', onClick);
-        return b;
-    }
     function mkInput(type, value, extraCls) {
         var i = document.createElement('input');
         i.type = type;
@@ -995,17 +1055,13 @@ function openCampaignManager() {
         i.className = 'atq-input' + (extraCls ? ' ' + extraCls : '');
         return i;
     }
-    function mkLabel(text) {
-        var s = document.createElement('span');
-        s.className = 'atq-label';
-        s.textContent = text;
-        return s;
-    }
 
     var list = getDropList();
     var settings = getDropSettings();
     var fallbackChannels = (settings.fallbackChannels || []).slice();
+    // localTracker is display only; save replays the edits onto a fresh tracker so farming writes aren't undone
     var localTracker = JSON.parse(JSON.stringify(getDropsTracker()));
+    var trackerEdits = [];
 
     var outer = document.createElement('div');
     outer.id = 'CampaignManagerWrapper';
@@ -1016,7 +1072,7 @@ function openCampaignManager() {
     titleEl.className = 'atq-title';
     titleEl.textContent = 'Campaign Manager';
     titlebar.appendChild(titleEl);
-    titlebar.appendChild(mkBtn('✕', function() { outer.remove(); }, 'atq-btn atq-btn-ghost'));
+    titlebar.appendChild(atqBtn('✕', function() { outer.remove(); }, 'atq-btn atq-btn-ghost'));
     outer.appendChild(titlebar);
 
     var checkInput = mkInput('number', settings.checkIntervalMinutes || 10, 'atq-input-num');
@@ -1028,10 +1084,10 @@ function openCampaignManager() {
 
     var tabsDiv = document.createElement('div');
     tabsDiv.className = 'atq-tabs';
-    var priorityTabBtn = mkBtn('Priority', function() { setTab('priority'); }, 'atq-tab');
-    var fallbackTabBtn = mkBtn('Fallback', function() { setTab('fallback'); }, 'atq-tab');
-    var trackerTabBtn = mkBtn('Tracker', function() { setTab('tracker'); }, 'atq-tab');
-    var settingsTabBtn = mkBtn('Settings', function() { setTab('settings'); }, 'atq-tab');
+    var priorityTabBtn = atqBtn('Priority', function() { setTab('priority'); }, 'atq-tab');
+    var fallbackTabBtn = atqBtn('Fallback', function() { setTab('fallback'); }, 'atq-tab');
+    var trackerTabBtn = atqBtn('Tracker', function() { setTab('tracker'); }, 'atq-tab');
+    var settingsTabBtn = atqBtn('Settings', function() { setTab('settings'); }, 'atq-tab');
     tabsDiv.appendChild(priorityTabBtn);
     tabsDiv.appendChild(fallbackTabBtn);
     tabsDiv.appendChild(trackerTabBtn);
@@ -1057,7 +1113,11 @@ function openCampaignManager() {
             playbackStallSeconds: parseInt(playbackStallInput.value) || 45,
             playbackReloadLimit: isNaN(parseInt(playbackReloadInput.value)) ? 2 : parseInt(playbackReloadInput.value)
         });
-        setDropsTracker(localTracker);
+        var tracker = applyTrackerEdits(getDropsTracker(), trackerEdits);
+        setDropsTracker(tracker);
+        trackerEdits = [];
+        localTracker = JSON.parse(JSON.stringify(tracker));
+        if (trackerTabBtn.classList.contains('atq-active')) renderTracker();
         popupText('Settings saved');
         refreshAllDropBtns();
     }
@@ -1074,12 +1134,12 @@ function openCampaignManager() {
         list.forEach(function(game, idx) {
             var item = document.createElement('div');
             item.className = 'atq-item';
-            item.appendChild(mkBtn('▲', function() {
+            item.appendChild(atqBtn('▲', function() {
                 if(idx === 0) return;
                 var tmp = list[idx - 1]; list[idx - 1] = list[idx]; list[idx] = tmp;
                 renderPriority();
             }, 'atq-btn atq-btn-icon'));
-            item.appendChild(mkBtn('▼', function() {
+            item.appendChild(atqBtn('▼', function() {
                 if(idx === list.length - 1) return;
                 var tmp = list[idx + 1]; list[idx + 1] = list[idx]; list[idx] = tmp;
                 renderPriority();
@@ -1088,7 +1148,7 @@ function openCampaignManager() {
             lbl.className = 'atq-item-label';
             lbl.textContent = (idx + 1) + '. ' + game.name;
             item.appendChild(lbl);
-            item.appendChild(mkBtn('✕', function() {
+            item.appendChild(atqBtn('✕', function() {
                 var name = game.name;
                 list.splice(idx, 1);
                 renderPriority();
@@ -1114,9 +1174,9 @@ function openCampaignManager() {
             renderFallback();
         }
         addInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') doAdd(); });
-        addRow.appendChild(mkLabel('Add:'));
+        addRow.appendChild(atqLabel('Add:'));
         addRow.appendChild(addInput);
-        addRow.appendChild(mkBtn('Add', doAdd, 'atq-btn atq-btn-primary atq-btn-sm'));
+        addRow.appendChild(atqBtn('Add', doAdd, 'atq-btn atq-btn-primary atq-btn-sm'));
         contentArea.appendChild(addRow);
         if (fallbackChannels.length === 0) {
             var empty = document.createElement('div');
@@ -1128,12 +1188,12 @@ function openCampaignManager() {
         fallbackChannels.forEach(function(channel, idx) {
             var item = document.createElement('div');
             item.className = 'atq-item';
-            item.appendChild(mkBtn('▲', function() {
+            item.appendChild(atqBtn('▲', function() {
                 if (idx === 0) return;
                 var tmp = fallbackChannels[idx - 1]; fallbackChannels[idx - 1] = fallbackChannels[idx]; fallbackChannels[idx] = tmp;
                 renderFallback();
             }, 'atq-btn atq-btn-icon'));
-            item.appendChild(mkBtn('▼', function() {
+            item.appendChild(atqBtn('▼', function() {
                 if (idx === fallbackChannels.length - 1) return;
                 var tmp = fallbackChannels[idx + 1]; fallbackChannels[idx + 1] = fallbackChannels[idx]; fallbackChannels[idx] = tmp;
                 renderFallback();
@@ -1145,7 +1205,7 @@ function openCampaignManager() {
             lbl.textContent = (idx + 1) + '. ' + displayName;
             lbl.title = channel;
             item.appendChild(lbl);
-            item.appendChild(mkBtn('✕', function() {
+            item.appendChild(atqBtn('✕', function() {
                 fallbackChannels.splice(idx, 1);
                 renderFallback();
             }, 'atq-btn atq-btn-icon atq-btn-danger'));
@@ -1177,14 +1237,16 @@ function openCampaignManager() {
                 var lbl = document.createElement('span');
                 lbl.className = 'atq-item-label' + (campaign.completed ? ' done' : '');
                 lbl.textContent = campaign.name + '  -  ends ' + campaign.endDate;
-                item.appendChild(mkBtn(campaign.completed ? 'Unmark' : 'Mark Done', function() {
+                item.appendChild(atqBtn(campaign.completed ? 'Unmark' : 'Mark Done', function() {
                     campaign.completed = !campaign.completed;
+                    trackerEdits.push({ type: 'toggle', game: gameName, name: campaign.name, completed: campaign.completed });
                     popupText((campaign.completed ? 'Completed: ' : 'Unmarked: ') + campaign.name);
                     renderTracker();
                 }, 'atq-btn atq-btn-sm'));
                 item.appendChild(lbl);
-                item.appendChild(mkBtn('✕', function() {
+                item.appendChild(atqBtn('✕', function() {
                     var name = campaign.name;
+                    trackerEdits.push({ type: 'delete', game: gameName, name: name });
                     localTracker[gameName] = localTracker[gameName].filter(function(c) { return c.name !== name; });
                     if (localTracker[gameName].length === 0) delete localTracker[gameName];
                     popupText('Deleted: ' + name);
@@ -1200,9 +1262,9 @@ function openCampaignManager() {
         function settingRow(labelText, input, suffix) {
             var row = document.createElement('div');
             row.className = 'atq-row';
-            row.appendChild(mkLabel(labelText));
+            row.appendChild(atqLabel(labelText));
             row.appendChild(input);
-            if (suffix) row.appendChild(mkLabel(suffix));
+            if (suffix) row.appendChild(atqLabel(suffix));
             contentArea.appendChild(row);
         }
         settingRow('Drop Check Minutes:', checkInput);
@@ -1221,18 +1283,19 @@ function openCampaignManager() {
         footer.innerHTML = '';
         if (tab === 'priority') {
             renderPriority();
-            footer.appendChild(mkBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
+            footer.appendChild(atqBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
         } else if (tab === 'fallback') {
             renderFallback();
-            footer.appendChild(mkBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
+            footer.appendChild(atqBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
         } else if (tab === 'settings') {
             renderSettings();
-            footer.appendChild(mkBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
+            footer.appendChild(atqBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
         } else {
             renderTracker();
-            footer.appendChild(mkBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
-            footer.appendChild(mkBtn('Delete Expired', function() {
+            footer.appendChild(atqBtn('Save Settings', saveSettings, 'atq-btn atq-btn-primary'));
+            footer.appendChild(atqBtn('Delete Expired', function() {
                 var before = Object.values(localTracker).reduce(function(s, a) { return s + a.length; }, 0);
+                trackerEdits.push({ type: 'deleteExpired' });
                 Object.keys(localTracker).forEach(function(gn) {
                     localTracker[gn] = localTracker[gn].filter(function(c) { return calculateTimeRemaining(c.endDate) >= -60; });
                     if (localTracker[gn].length === 0) delete localTracker[gn];
@@ -1242,25 +1305,48 @@ function openCampaignManager() {
                 renderTracker();
                 popupText(n > 0 ? 'Deleted ' + n + ' expired campaign' + (n !== 1 ? 's' : '') + '.' : 'No expired campaigns to delete');
             }, 'atq-btn atq-btn-sm'));
-            footer.appendChild(mkBtn('Delete All', function() {
+            footer.appendChild(atqBtn('Delete All', function() {
                 if (confirm('Delete all tracked campaigns?')) {
                     localTracker = {};
+                    trackerEdits.push({ type: 'deleteAll' });
                     renderTracker();
                     popupText('All campaigns deleted');
                 }
             }, 'atq-btn atq-btn-sm atq-btn-danger'));
         }
-        // Mirrors the Campaign Manager button in the Progress Manager's footer. Like Close,
-        // this drops any unsaved edits, so it sits next to it rather than near Save.
-        footer.appendChild(mkBtn('Progress Manager', function() {
+        // Discards unsaved edits like Close, so it sits beside Close
+        footer.appendChild(atqBtn('Progress Manager', function() {
             outer.remove();
             openProgressManager();
         }, 'atq-btn atq-btn-sm'));
-        footer.appendChild(mkBtn('Close', function() { outer.remove(); }, 'atq-btn'));
+        footer.appendChild(atqBtn('Close', function() { outer.remove(); }, 'atq-btn'));
     }
 
     setTab('priority');
     document.body.prepend(outer);
+}
+
+function applyTrackerEdits(tracker, edits) {
+    edits.forEach(function(e) {
+        if (e.type === 'deleteAll') {
+            tracker = {};
+        } else if (e.type === 'deleteExpired') {
+            Object.keys(tracker).forEach(function(gn) {
+                if (!Array.isArray(tracker[gn])) return;
+                tracker[gn] = tracker[gn].filter(function(c) { return calculateTimeRemaining(c.endDate) >= -60; });
+                if (tracker[gn].length === 0) delete tracker[gn];
+            });
+        } else if (Array.isArray(tracker[e.game])) {
+            if (e.type === 'toggle') {
+                var c = tracker[e.game].find(function(c) { return c.name === e.name; });
+                if (c) c.completed = e.completed;
+            } else if (e.type === 'delete') {
+                tracker[e.game] = tracker[e.game].filter(function(c) { return c.name !== e.name; });
+                if (tracker[e.game].length === 0) delete tracker[e.game];
+            }
+        }
+    });
+    return tracker;
 }
 
 function formatCountdown(ms) {
@@ -1359,9 +1445,25 @@ function openProgressManager() {
         }
         contentArea.appendChild(header);
 
+        // Reward campaign progress is only visible here, never in the inventory snapshot
+        var watch = GM_getValue('watchDropsSnapshot', null);
+        if (watch && Array.isArray(watch.items) && watch.items.length > 0) {
+            var wh = document.createElement('div');
+            wh.className = 'atq-game-header';
+            wh.textContent = 'Current stream (Watch Drops)';
+            contentArea.appendChild(wh);
+            var wn = document.createElement('div');
+            wn.className = 'atq-note';
+            wn.textContent = watch.channel + ', read ' + atqRelativeTime(watch.takenAt) + '.';
+            contentArea.appendChild(wn);
+            watch.items.forEach(function(d) {
+                appendDropRow(d.name + (d.game ? '  ·  ' + d.game : ''), d.percent,
+                    [d.requirement, d.left].filter(Boolean).join(', '));
+            });
+        }
+
         if (!snap || snap.campaigns.length === 0) {
-            // Nothing captured yet, so show when the data will arrive rather than loading
-            // the page, exactly as the stored-data-only contract requires
+            // Nothing captured yet: show when the data will arrive
             contentArea.appendChild(mkMsgPane(
                 untilCheck !== null ? formatCountdown(untilCheck) : '--:--',
                 snap
@@ -1391,55 +1493,57 @@ function openProgressManager() {
             }
 
             c.drops.forEach(function(d) {
-                var pct = parseInt(d.percent);
-                if (isNaN(pct)) pct = 0;
-                var complete = pct >= 100;
-
-                var item = document.createElement('div');
-                item.className = 'atq-drop';
-
-                var top = document.createElement('div');
-                top.className = 'atq-drop-top';
-                var nm = document.createElement('span');
-                nm.className = 'atq-drop-name';
-                nm.textContent = d.name;
-                var pc = document.createElement('span');
-                pc.className = 'atq-drop-pct' + (complete ? ' done' : '');
-                pc.textContent = pct + '%';
-                top.appendChild(nm);
-                top.appendChild(pc);
-                item.appendChild(top);
-
-                if (d.requirement) {
-                    var req = document.createElement('div');
-                    req.className = 'atq-drop-req';
-                    req.textContent = d.requirement;
-                    item.appendChild(req);
-                }
-
-                var bar = document.createElement('div');
-                bar.className = 'atq-bar';
-                var fill = document.createElement('div');
-                fill.className = 'atq-bar-fill' + (complete ? ' done' : '');
-                fill.style.width = Math.min(100, pct) + '%';
-                bar.appendChild(fill);
-                item.appendChild(bar);
-
-                contentArea.appendChild(item);
+                appendDropRow(d.name, d.percent, d.requirement);
             });
         });
+    }
+
+    function appendDropRow(name, percent, requirement) {
+        var pct = parseFloat(percent);
+        if (isNaN(pct)) pct = 0;
+        var complete = pct >= 100;
+
+        var item = document.createElement('div');
+        item.className = 'atq-drop';
+
+        var top = document.createElement('div');
+        top.className = 'atq-drop-top';
+        var nm = document.createElement('span');
+        nm.className = 'atq-drop-name';
+        nm.textContent = name;
+        var pc = document.createElement('span');
+        pc.className = 'atq-drop-pct' + (complete ? ' done' : '');
+        pc.textContent = (Math.round(pct * 10) / 10) + '%';
+        top.appendChild(nm);
+        top.appendChild(pc);
+        item.appendChild(top);
+
+        if (requirement) {
+            var req = document.createElement('div');
+            req.className = 'atq-drop-req';
+            req.textContent = requirement;
+            item.appendChild(req);
+        }
+
+        var bar = document.createElement('div');
+        bar.className = 'atq-bar';
+        var fill = document.createElement('div');
+        fill.className = 'atq-bar-fill' + (complete ? ' done' : '');
+        fill.style.width = Math.min(100, pct) + '%';
+        bar.appendChild(fill);
+        item.appendChild(bar);
+
+        contentArea.appendChild(item);
     }
 
     function renderFrameTab(which) {
         var frame = which === 'inventory' ? inventoryIframe : campaignsIframe;
         var alive = !!(frame && frame.parentNode);
-        // Both frames are driven by the same inventory tick: the priority check that uses the
-        // campaigns frame runs from inside runInventoryCheck, so they share one countdown.
+        // Both frames run off the inventory tick, so they share one countdown
         var untilCheck = msUntilCheck("atqNextInventoryCheckAt");
 
         if (alive) {
-            // Placeholder only. The real iframe stays in the never-reparented host and is
-            // positioned over this box, so switching tabs never reloads the page.
+            // Placeholder; the real iframe stays in the host and is positioned over it
             framePane = document.createElement('div');
             framePane.className = 'atq-framepane';
             contentArea.appendChild(framePane);
@@ -1488,7 +1592,8 @@ function openProgressManager() {
         [
             'AutoTwitchQueuerAutoFarmCampaigns', 'farmingGameName', 'farmingCampaignName',
             'farmingGameIdx', 'farmingLinkIndex', 'farmingAllLinks',
-            'farmingLastProgress', 'farmingNoProgressChecks', 'farmingStalledChecks',
+            'farmingLastProgress', 'farmingLastPanelProgress', 'farmingPanelChangedAt',
+            'farmingNoProgressChecks', 'farmingStalledChecks',
             'farmingIsStallFallback', 'farmingSkipCampaigns',
             'farmingStallGameNames', 'farmingStallSameGame', 'fallbackChannelIndex'
         ].forEach(function(k) { kv(k, sessionStorage.getItem(k)); });
@@ -1550,6 +1655,9 @@ function openProgressManager() {
         var snap = getInventorySnapshot();
         kv('dropProgressSnapshot', snap ? (snap.campaigns.length + ' campaign(s), ' + (snap.claimed || []).length + ' claimed, ' +
             (snap.rewards || []).length + ' reward(s), ' + atqRelativeTime(snap.takenAt)) : null);
+        var watchSnap = GM_getValue('watchDropsSnapshot', null);
+        kv('watchDropsSnapshot', watchSnap && Array.isArray(watchSnap.items)
+            ? watchSnap.items.length + ' item(s) on ' + watchSnap.channel + ', ' + atqRelativeTime(watchSnap.takenAt) : null);
         kv('dropGameList', getDropList().map(function(g) { return g.name; }).join(', '));
     }
 
@@ -1561,7 +1669,7 @@ function openProgressManager() {
 
         var toggleRow = document.createElement('div');
         toggleRow.className = 'atq-row';
-        toggleRow.appendChild(mkLabelEl('Debug logging:'));
+        toggleRow.appendChild(atqLabel('Debug logging:'));
         var toggleBtn = atqBtn(debug ? 'ON' : 'OFF', function() {
             setDebugLogging(!debug);
             render();
@@ -1576,6 +1684,13 @@ function openProgressManager() {
             ['Run Inventory Check', runInventoryCheck],
             ['Run Offline Check', runOfflineCheck],
             ['Run Priority Check', runPriorityCheck],
+            ['Read Watch Drops', function() {
+                readWatchDropsPanel().then(function(panel) {
+                    popupText(panel.ok
+                        ? 'Watch Drops: ' + (panel.items.map(function(d) { return d.name + ' ' + (Math.round(d.percent * 10) / 10) + '%'; }).join(', ') || 'no items')
+                        : 'Watch Drops: could not read the panel');
+                });
+            }],
             ['Check Playback', function() { popupText('Playback: ' + getPlaybackState()); }],
             ['Force Playback Recovery', attemptPlaybackRecovery],
             ['Cull Iframes', function() { debugCullIframes(); render(); }],
@@ -1600,15 +1715,7 @@ function openProgressManager() {
         contentArea.appendChild(log);
     }
 
-    function mkLabelEl(text) {
-        var s = document.createElement('span');
-        s.className = 'atq-label';
-        s.textContent = text;
-        return s;
-    }
-
-    // The host must sit exactly over the placeholder, and must be stashed whenever the
-    // active tab is not showing a frame, so it can never overlap the rest of the UI.
+    // Keep the host over the placeholder, or stashed when no frame tab is showing
     function syncHost() {
         var host = getIframeHost();
         var showing = null;
@@ -1643,9 +1750,9 @@ function openProgressManager() {
             renderFrameTab(activeTab);
             footer.appendChild(atqBtn('Load Now', function() {
                 var f = activeTab === 'inventory' ? getInventoryIframe() : getCampaignsIframe();
-                f.src = activeTab === 'inventory'
+                navigateIframe(f, activeTab === 'inventory'
                     ? 'https://www.twitch.tv/drops/inventory'
-                    : 'https://www.twitch.tv/drops/campaigns';
+                    : 'https://www.twitch.tv/drops/campaigns');
                 render();
             }, 'atq-btn atq-btn-sm'));
             footer.appendChild(atqBtn('Unload', function() { killIframes(); render(); }, 'atq-btn atq-btn-sm'));
@@ -1676,15 +1783,13 @@ function openProgressManager() {
     document.body.prepend(outer);
     setTab('drops');
 
-    // One second is enough for countdowns and keeps the frame tabs cheap, since re-rendering
-    // only ever rebuilds the placeholder and never the iframe itself.
+    // 1s refresh for countdowns; re-rendering never rebuilds the iframe
     progressPanelTimer = setInterval(function() {
         if (!document.getElementById('ProgressManagerWrapper')) { closeProgressManager(); return; }
         render();
     }, 1000);
 
-    // Geometry is tracked per frame rather than on resize alone, so the overlay stays glued
-    // to the placeholder through scrollbars, zoom changes, and Twitch's own layout shifts.
+    // Track geometry every frame so the overlay follows layout shifts
     (function trackGeometry() {
         if (!document.getElementById('ProgressManagerWrapper')) return;
         syncHost();
@@ -1703,9 +1808,7 @@ function closeProgressManager() {
     }
 }
 
-// Every mode in which the script is actively driving the page, not merely loaded on it.
-// Interval handles are checked for truthiness rather than against null because they are
-// declared with bare `var` and read as undefined until their initialiser runs.
+// True while the script drives the page. Intervals are checked for truthiness since they start undefined
 function isScriptActive() {
     // Auto farm campaigns
     if (sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") === "true") return true;
@@ -1722,9 +1825,7 @@ function isScriptActive() {
     return false;
 }
 
-// The launcher appears and disappears with that state, so polling drives it rather than a
-// one-shot build: detectSite only starts its loops 30s in, and auto-farm can be toggled at
-// any time. It also stays put while the panel is open so the panel can be closed from it.
+// Polled because detectSite's loops start 30s in and auto-farm can toggle anytime
 function syncProgressLauncher() {
     var btn = document.getElementById('ATQProgressLauncher');
     var wanted = isScriptActive() || !!document.getElementById('ProgressManagerWrapper');
@@ -1754,9 +1855,15 @@ function createProgressLauncher() {
     syncProgressLauncher();
 }
 
-function findCampaignContainer(header) {
+function getOpenDropHeader(doc) {
+    return Array.from(doc.querySelectorAll('h4')).find(function(el) { return el.textContent.trim() === "Open Drop Campaigns"; }) || null;
+}
+
+// doc defaults to the page; the priority check passes the campaigns iframe's document
+function findCampaignContainer(header, doc) {
     var el = header;
-    while (el && el !== document.body) {
+    var body = (doc || document).body;
+    while (el && el !== body) {
         var sibling = el.nextElementSibling;
         if (sibling && sibling.querySelector('button[aria-expanded]')) return sibling;
         el = el.parentElement;
@@ -1777,23 +1884,22 @@ function findCampaignContainerAllSiblings(header) {
     return null;
 }
 
-// This is the only entry point for campaign page work, so it must not depend on a DOM mutation
-// arriving: a backgrounded tab stops mutating and the whole farming chain would wait for the tab
-// to be focused. waitForCondition adds the synchronous first attempt and the polling fallback.
+// Entry point for campaigns page work; polls so a background tab can't stall it
 function injectDropButtons() {
     var injected = false;
     function tryInject() {
         if (injected) return true;
-        var dropHeader = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Drop Campaigns");
+        var dropHeader = getOpenDropHeader(document);
         if(!dropHeader) return false;
         // An empty drop section still counts as loaded, or reward-only farming would never start
         var dropsEmpty = /no Drops campaigns available/i.test(document.body.textContent);
         if(!findCampaignContainer(dropHeader) && !dropsEmpty) return false;
-        // Commit before running the chain below, where the original disconnected its observer:
-        // autoFarmCampaigns is not safe to enter twice, so a throw must not leave it retryable.
+        // Commit first: autoFarmCampaigns must not run twice
         injected = true;
         renderAllCampaignButtons();
         if(sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") == "true" && window.location.pathname === "/drops/campaigns") {
+            popupText("Debug: Campaigns page rendered (" + document.visibilityState + "), prefetching inventory");
+            campaignsInventoryPromise = loadInventoryPage();
             autoFarmCampaigns();
         }
         return true;
@@ -1801,9 +1907,15 @@ function injectDropButtons() {
     function start() {
         // Buttons render independently of the farming gate below, as soon as each row exists
         keepCampaignButtonsRendered();
+        armCampaignsWatchdog();
         waitForCondition(document.body, tryInject, {
             timeoutMs: 300000,
-            onTimeout: function() { popupText("Debug: Campaign list never rendered, gave up injecting drop buttons"); }
+            onTimeout: function() {
+                popupText("Debug: Campaign list never rendered, gave up injecting drop buttons");
+                if (sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") == "true") {
+                    retryCampaignsPage("campaign list never rendered");
+                }
+            }
         });
     }
     if (document.body) start();
@@ -1813,15 +1925,13 @@ function injectDropButtons() {
 // Every renderer skips rows that already carry a button, so this is safe to run repeatedly
 function renderAllCampaignButtons() {
     renderRewardButtons();
-    var dropHeader = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Drop Campaigns");
+    var dropHeader = getOpenDropHeader(document);
     var dropContainer = dropHeader ? findCampaignContainer(dropHeader) : null;
     if (dropContainer) renderDropButtons(dropContainer);
     renderClosedDropButtons();
 }
 
-// Twitch renders the campaign sections in stages and re-renders them afterwards (rows arrive
-// without thumbnails, whole reward blocks get replaced), so a single injection pass leaves rows
-// without buttons. The poll covers background tabs where mutations stop, as in waitForCondition.
+// Rows render in stages and get replaced, so buttons are re-applied on mutations and a poll
 function keepCampaignButtonsRendered() {
     var debounce = null;
     function pass() {
@@ -1850,26 +1960,30 @@ function renderDropButtons(campaignContainer) {
         if(row.querySelector('.atq-drop-btn')) return;
         var nameEl = row.querySelector('p');
         if(!nameEl) return;
-        var gameName = nameEl.textContent.trim();
-        var header = row.querySelector('.accordion-header, [role="heading"]');
-        if(!header) return;
-        var btn = document.createElement('button');
-        btn.className = 'atq-drop-btn';
-        btn.dataset.atqGame = gameName;
-        btn.style.cssText = "position:absolute; left:6px; top:50%; transform:translateY(-50%); z-index:9999; width:22px; height:22px; border:none; border-radius:4px; font-size:15px; font-weight:700; line-height:1; cursor:pointer; transition:background 0.12s, color 0.12s; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; display:flex; align-items:center; justify-content:center;";
-        updateDropBtn(btn, gameName);
-        btn.addEventListener('mouseenter', function() { btn.style.background = '#9147ff'; btn.style.color = '#fff'; });
-        btn.addEventListener('mouseleave', function() { updateDropBtn(btn, gameName); });
-        btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            toggleDropGame(gameName);
-            refreshAllDropBtns();
-        });
-        header.style.position = 'relative';
-        var accordionToggle = header.querySelector('button');
-        if(accordionToggle) accordionToggle.style.paddingLeft = '2.5rem';
-        header.appendChild(btn);
+        addDropButton(row, nameEl.textContent.trim());
     });
+}
+
+// The +/− toggle on a campaign row's header, shared by drop and reward rows
+function addDropButton(row, gameName) {
+    var header = row.querySelector('.accordion-header, [role="heading"]');
+    if (!header) return;
+    var btn = document.createElement('button');
+    btn.className = 'atq-drop-btn';
+    btn.dataset.atqGame = gameName;
+    btn.style.cssText = "position:absolute; left:6px; top:50%; transform:translateY(-50%); z-index:9999; width:22px; height:22px; border:none; border-radius:4px; font-size:15px; font-weight:700; line-height:1; cursor:pointer; transition:background 0.12s, color 0.12s; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; display:flex; align-items:center; justify-content:center;";
+    updateDropBtn(btn, gameName);
+    btn.addEventListener('mouseenter', function() { btn.style.background = '#9147ff'; btn.style.color = '#fff'; });
+    btn.addEventListener('mouseleave', function() { updateDropBtn(btn, gameName); });
+    btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        toggleDropGame(gameName);
+        refreshAllDropBtns();
+    });
+    header.style.position = 'relative';
+    var accordionToggle = header.querySelector('button');
+    if (accordionToggle) accordionToggle.style.paddingLeft = '2.5rem';
+    header.appendChild(btn);
 }
 
 function refreshAllDropBtns() {
@@ -1885,10 +1999,7 @@ function updateDropBtn(btn, gameName) {
     btn.style.color = inList ? '#9147ff' : '#adadb8';
 }
 
-// The reward section is split across several sibling containers (e.g. a badge collection block
-// followed by the regular reward list), so rows are collected by document position: every
-// accordion between the "Open Reward Campaigns" header and the next section's h4. Always re-query
-// rather than caching a container, since React swaps these blocks out after the first render.
+// Reward rows are every accordion between the Open Reward Campaigns h4 and the next h4; always re-queried
 function getRewardRows(doc) {
     var headers = Array.from(doc.querySelectorAll('h4'));
     var rewardHeader = headers.find(function(el) { return el.textContent.trim() === "Open Reward Campaigns"; });
@@ -1916,24 +2027,7 @@ function renderRewardButtons() {
         if (row.querySelector('.atq-drop-btn')) return;
         var gameName = rewardRowGameName(row);
         if (!gameName) return;
-        var header = row.querySelector('.accordion-header, [role="heading"]');
-        if (!header) return;
-        var btn = document.createElement('button');
-        btn.className = 'atq-drop-btn';
-        btn.dataset.atqGame = gameName;
-        btn.style.cssText = "position:absolute; left:6px; top:50%; transform:translateY(-50%); z-index:9999; width:22px; height:22px; border:none; border-radius:4px; font-size:15px; font-weight:700; line-height:1; cursor:pointer; transition:background 0.12s, color 0.12s; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; display:flex; align-items:center; justify-content:center;";
-        updateDropBtn(btn, gameName);
-        btn.addEventListener('mouseenter', function() { btn.style.background = '#9147ff'; btn.style.color = '#fff'; });
-        btn.addEventListener('mouseleave', function() { updateDropBtn(btn, gameName); });
-        btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            toggleDropGame(gameName);
-            refreshAllDropBtns();
-        });
-        header.style.position = 'relative';
-        var accordionToggle = header.querySelector('button');
-        if (accordionToggle) accordionToggle.style.paddingLeft = '2.5rem';
-        header.appendChild(btn);
+        addDropButton(row, gameName);
     });
 }
 
@@ -1974,7 +2068,47 @@ function useFallbackOr(message) {
         queueFallbackChannel(0);
     } else {
         popupText(message);
+        scheduleCampaignsRescan();
     }
+}
+
+// Nothing to farm: disarm the watchdog and re-scan later
+function scheduleCampaignsRescan() {
+    if (window.location.pathname !== "/drops/campaigns") return;
+    if (sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") != "true") return;
+    clearTimeout(campaignsWatchdogTimer);
+    var minutes = getDropSettings().checkIntervalMinutes;
+    popupText("Debug: Nothing to farm, re-scanning campaigns in " + minutes + " min");
+    campaignsWatchdogTimer = setTimeout(function() {
+        retryCampaignsPage("scheduled re-scan");
+    }, minutes * 60000);
+}
+
+// Still on the campaigns page after this long means something stalled
+function armCampaignsWatchdog() {
+    if (window.location.pathname !== "/drops/campaigns") return;
+    if (sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") != "true") return;
+    clearTimeout(campaignsWatchdogTimer);
+    campaignsWatchdogTimer = setTimeout(function() {
+        retryCampaignsPage("campaigns page watchdog");
+    }, 300000);
+}
+
+// Reloads the campaigns page, waiting up to 2 min for the tab to be visible
+function retryCampaignsPage(reason) {
+    if (campaignsRetryPending) return;
+    if (sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") != "true") return;
+    campaignsRetryPending = true;
+    clearTimeout(campaignsWatchdogTimer);
+    popupText("Debug: Retrying campaigns page (" + reason + ", " + document.visibilityState + ")");
+    function go() {
+        document.removeEventListener('visibilitychange', onVisible);
+        cleanRedirect("https://www.twitch.tv/drops/campaigns");
+    }
+    function onVisible() { if (document.visibilityState === 'visible') go(); }
+    if (document.visibilityState === 'visible') { go(); return; }
+    document.addEventListener('visibilitychange', onVisible);
+    setTimeout(go, 120000);
 }
 
 function autoFarmCampaignsToggle() {
@@ -1998,6 +2132,7 @@ function autoFarmCampaigns() {
         cleanRedirect("https://www.twitch.tv/drops/campaigns");
         return;
     }
+    armCampaignsWatchdog();
     var list = getDropList();
     if(list.length === 0) {
         useFallbackOr("No campaigns in priority list");
@@ -2015,20 +2150,20 @@ function autoFarmCampaigns() {
     }
 }
 
-function farmNextPriority(list, idx) {
+function farmNextPriority(list, idx, retries) {
+    retries = retries || 0;
     if(idx >= list.length) {
         stopInventoryChecking();
         useFallbackOr("All priority games completed");
         return;
     }
     var game = list[idx];
-    // Reward campaign accordions and drop campaign rows are formatted differently, but both
-    // get collected here and merged into one campaign list per game
+    // Drop and reward rows are merged into one campaign list per game
     var rewardRows = getRewardRows(document).filter(function(row) {
         return rewardRowGameName(row) === game.name;
     });
     var matchingRows = [];
-    var header = Array.from(document.querySelectorAll('h4')).find(el => el.textContent.trim() === "Open Drop Campaigns");
+    var header = getOpenDropHeader(document);
     var campaignContainer = header ? findCampaignContainer(header) : null;
     if (campaignContainer) {
         matchingRows = Array.from(campaignContainer.children).filter(function(row) {
@@ -2038,6 +2173,7 @@ function farmNextPriority(list, idx) {
     }
     if (!campaignContainer && rewardRows.length === 0) {
         popupText("Could not find campaigns list");
+        retryCampaignsPage("campaigns list missing");
         return;
     }
     popupText("Debug: Found " + matchingRows.length + " drop row(s) and " + rewardRows.length + " reward row(s) for " + game.name);
@@ -2049,25 +2185,56 @@ function farmNextPriority(list, idx) {
     var toLoad = rewardRows.concat(matchingRows).filter(function(r) {
         return !r.querySelector('.drop-details__label');
     });
-    expandRowsSequentially(toLoad, function() {
-        parseAllCampaignsAndQueue(game, matchingRows, rewardRows, list, idx);
+    expandRowsSequentially(toLoad, function(failures) {
+        parseAllCampaignsAndQueue(game, matchingRows, rewardRows, list, idx, failures, retries);
     });
 }
 
-function parseAllCampaignsAndQueue(game, matchingRows, rewardRows, list, idx) {
+function parseAllCampaignsAndQueue(game, matchingRows, rewardRows, list, idx, expandFailures, retries) {
+    // Rows are held across async expansion and inventory waits, and Twitch can re-render one with
+    // another game's campaigns in it, so confirm each row still belongs to this game
+    var changed = matchingRows.some(function(r) { var p = r.querySelector('p'); return !p || p.textContent.trim() !== game.name; })
+        || rewardRows.some(function(r) { return rewardRowGameName(r) !== game.name; });
+    if (changed) {
+        if ((retries || 0) < 3) {
+            popupText("Row for " + game.name + " changed while reading, re-scanning");
+            setTimeout(function() { farmNextPriority(list, idx, (retries || 0) + 1); }, 2000);
+            return;
+        }
+        matchingRows = matchingRows.filter(function(r) { var p = r.querySelector('p'); return p && p.textContent.trim() === game.name; });
+        rewardRows = rewardRows.filter(function(r) { return rewardRowGameName(r) === game.name; });
+    }
     sweepExpiredCampaigns();
     var campaigns = parseCampaignsFromRow(matchingRows);
     rewardRows.forEach(function(row) {
         campaigns.push(parseRewardCampaignFromRow(game, row));
     });
     popupText("Debug: Parsed " + campaigns.length + " campaign(s) for " + game.name + ": [" + campaigns.map(function(c) { return c.name; }).join(", ") + "]");
+    if (expandFailures > 0 && (campaigns.length === 0 || document.visibilityState === 'hidden')) {
+        // Details never rendered (usually a hidden tab), which says nothing about the game, so retry
+        retryCampaignsPage("details never rendered for " + game.name);
+        return;
+    }
+    // Campaigns in a row can render one at a time; re-read before deciding a tracked one is gone
+    var parsedNames = campaigns.map(function(c) { return c.name; });
+    var missing = (getDropsTracker()[game.name] || []).filter(function(t) {
+        return !t.completed && calculateTimeRemaining(t.endDate) > 0 && parsedNames.indexOf(t.name) === -1;
+    }).map(function(t) { return t.name; });
+    if (missing.length > 0 && (retries || 0) < 3) {
+        popupText("Debug: Missing [" + missing.join(", ") + "] for " + game.name + ", re-reading row");
+        setTimeout(function() { farmNextPriority(list, idx, (retries || 0) + 1); }, 2000);
+        return;
+    }
     if (campaigns.length === 0) {
         popupText("No campaigns found for: " + game.name + ", skipping");
         farmNextPriority(list, idx + 1);
         return;
     }
     campaigns.forEach(function(campaign) {
-        addCampaignToTracker(game.name, campaign.name, campaign.endDate, { drops: campaign.drops, startMs: campaign.startMs });
+        addCampaignToTracker(game.name, campaign.name, campaign.endDate, {
+            drops: campaign.drops, nonWatchDrops: campaign.nonWatchDrops, startMs: campaign.startMs,
+            reward: campaign.reward
+        });
     });
     var tracker = getDropsTracker();
     var needsInventory = campaigns.some(function(c) {
@@ -2075,14 +2242,13 @@ function parseAllCampaignsAndQueue(game, matchingRows, rewardRows, list, idx) {
         return tracked && !tracked.completed;
     });
     if (needsInventory && !campaignsPageInventory) {
-        // Campaigns that were finished before farming started never show up In Progress, so check
-        // Claimed/Rewards before queueing instead of watching a stream for nothing. Read once per
-        // campaigns page visit; later games on this pass reuse it.
-        popupText("Debug: Reading inventory for already claimed campaigns");
-        loadInventoryPage().then(function(inv) {
+        // Check Claimed/Rewards once per visit so already-finished campaigns aren't queued
+        popupText("Debug: " + (campaignsInventoryPromise ? "Waiting on prefetched inventory" : "Reading inventory for already claimed campaigns"));
+        if (!campaignsInventoryPromise) campaignsInventoryPromise = loadInventoryPage();
+        campaignsInventoryPromise.then(function(inv) {
             campaignsPageInventory = inv;
             if (!inv.ok) popupText("Debug: Inventory read failed, continuing without claimed check");
-            parseAllCampaignsAndQueue(game, matchingRows, rewardRows, list, idx);
+            parseAllCampaignsAndQueue(game, matchingRows, rewardRows, list, idx, expandFailures, retries);
         });
         return;
     }
@@ -2096,7 +2262,7 @@ function parseAllCampaignsAndQueue(game, matchingRows, rewardRows, list, idx) {
     });
     popupText("Debug: " + uncompleted.length + " uncompleted: [" + uncompleted.map(function(c) { return c.name; }).join(", ") + "]");
     if (uncompleted.length === 0) {
-        popupText("All campaigns completed for: " + game.name + ", moving to next");
+        popupText("All campaigns completed for: " + game.name + " [" + parsedNames.join(", ") + "], moving to next");
         sessionStorage.removeItem("farmingSkipCampaigns");
         farmNextPriority(list, idx + 1);
         return;
@@ -2146,6 +2312,8 @@ function findNextFarmableCampaign(game, matchingRows, list, idx, uncompleted) {
         var stillUncompleted = getUncompletedCampaigns(game.name);
         if (stillUncompleted.length > 0) {
             findNextFarmableCampaign(game, matchingRows, list, idx, stillUncompleted);
+        } else {
+            farmNextPriority(list, idx + 1);
         }
         return;
     }
@@ -2172,10 +2340,7 @@ function queueStreamFor(url, watchMinutes) {
 }
 
 function skipCampaignAndContinue(game, campaign, list, idx) {
-    // Dead-ending on a queue failure would freeze the farming loop entirely, so mark the
-    // campaign as skipped for this session and re-scan the game from scratch. The re-scan
-    // also picks up fresh DOM nodes in case the failure was a stale row after a re-render,
-    // and the skip list guarantees termination (all skipped -> stall path -> next game).
+    // Skip the campaign for this session and re-scan; the skip list guarantees termination
     var skipList = JSON.parse(sessionStorage.getItem("farmingSkipCampaigns") || "[]");
     if (!skipList.includes(campaign.name)) skipList.push(campaign.name);
     sessionStorage.setItem("farmingSkipCampaigns", JSON.stringify(skipList));
@@ -2186,8 +2351,7 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
     var rows = Array.isArray(matchingRows) ? matchingRows : [matchingRows];
     var targetBlock = null;
     if (campaign.rewardRow) {
-        // Reward campaigns carry their accordion row directly since they have no
-        // per-campaign <strong> name to locate inside the drop campaign rows
+        // Reward campaigns carry their accordion row
         targetBlock = campaign.rewardRow;
     } else {
         targetBlock = findDropCampaignBlock(rows, campaign.name);
@@ -2212,8 +2376,7 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
         return;
     }
     var items = Array.from(ul.querySelectorAll('li'));
-    // Matches "Watch for 20 minutes" (drop campaigns) and "Watch 20 minutes" (reward campaigns);
-    // campaigns earned another way (e.g. subscriptions) have no watch item and get skipped
+    // Matches "Watch for 20 minutes" and "Watch 20 minutes"; sub-only campaigns have neither
     var watchItems = items.filter(li => /watch\s+(for\s+)?\d+/i.test(li.textContent));
     if(watchItems.length === 0) {
         popupText("No watchable drops for: " + campaign.name + ", marking complete");
@@ -2226,12 +2389,7 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
         }
         return;
     }
-    // Prefer links inside the watch-time item (so a reward's "visit your Drops Inventory"
-    // item can't contribute its link), but some drop campaigns put the channel/category
-    // links in a different list item than the watch-time one, so fall back to the first
-    // item that actually has links
-    // Only Twitch channel/category links count; badge collections put a help.twitch.tv
-    // "Learn More" link in their watch item, which must never be queued as the stream
+    // Prefer links in the watch item, else the first item with links; only Twitch channel/category links count
     function watchableLinks(li) {
         return Array.from(li.querySelectorAll('a')).filter(function(a) {
             var href = a.getAttribute('href') || '';
@@ -2251,6 +2409,8 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
     sessionStorage.setItem("farmingAllLinks", JSON.stringify(links.map(function(l) { return l.getAttribute('href'); })));
     sessionStorage.setItem("farmingLinkIndex", String(links.length - 1));
     sessionStorage.removeItem("farmingLastProgress");
+    sessionStorage.removeItem("farmingLastPanelProgress");
+    sessionStorage.removeItem("farmingPanelChangedAt");
     sessionStorage.removeItem("farmingStalledChecks");
     sessionStorage.removeItem("farmingNoProgressChecks");
     var streamUrl = streamHref.startsWith('http') ? streamHref : "https://www.twitch.tv" + streamHref;
@@ -2262,7 +2422,7 @@ function queueCampaignStream(game, matchingRows, campaign, list, idx) {
     sessionStorage.setItem("farmingGameIdx", idx.toString());
     sessionStorage.setItem("farmingGameName", game.name);
     sessionStorage.setItem("farmingCampaignName", campaign.name);
-    popupText("Queued: " + campaign.name + " for " + watchMinutes + " min");
+    popupText("Queued: " + campaign.name + " (" + game.name + ") for " + watchMinutes + " min");
     processSchedule();
 }
 
@@ -2273,6 +2433,8 @@ function clearFarmingSessionState() {
     sessionStorage.removeItem("farmingAllLinks");
     sessionStorage.removeItem("farmingLinkIndex");
     sessionStorage.removeItem("farmingLastProgress");
+    sessionStorage.removeItem("farmingLastPanelProgress");
+    sessionStorage.removeItem("farmingPanelChangedAt");
     sessionStorage.removeItem("farmingNoProgressChecks");
     sessionStorage.removeItem("farmingStalledChecks");
     sessionStorage.removeItem("farmingIsStallFallback");
@@ -2306,18 +2468,24 @@ function tryNextFallbackChannel() {
     if (nextIdx < channels.length) {
         popupText("Fallback " + (idx + 1) + " offline. Trying fallback " + (nextIdx + 1));
         queueFallbackChannel(nextIdx);
-    } else {
-        popupText("All fallback channels offline. Waiting.");
+        return true;
     }
+    popupText("All fallback channels offline. Waiting.");
+    return false;
+}
+
+// The link currently being watched, absolute, or null when not farming a campaign link
+function currentFarmingLink() {
+    var allLinks = JSON.parse(sessionStorage.getItem("farmingAllLinks") || "[]");
+    var href = allLinks[parseInt(sessionStorage.getItem("farmingLinkIndex") || "-1")];
+    if (!href) return null;
+    return href.startsWith('http') ? href : "https://www.twitch.tv" + href;
 }
 
 function tryNextAvailableLink(gameName, campaignName) {
     var allLinks = JSON.parse(sessionStorage.getItem("farmingAllLinks") || "[]");
     var linkIndex = parseInt(sessionStorage.getItem("farmingLinkIndex") || "-1");
-    // A category link is always the last link, so it's always the initial pick when present.
-    // If the list has a category link and we stalled on it, there's no point falling back to
-    // the specific channels (they stream the same category), so treat the campaign as stalled.
-    // Channel links are only iterated for campaigns that have no category link at all.
+    // The category link is last and picked first; if it stalled, its channels won't help
     var hasCategoryLink = allLinks.some(function(l) { return l && l.includes("/directory/category"); });
     var nextIndex = hasCategoryLink ? -1 : linkIndex - 1;
     if (nextIndex >= 0 && allLinks[nextIndex]) {
@@ -2325,6 +2493,8 @@ function tryNextAvailableLink(gameName, campaignName) {
         var nextUrl = nextHref.startsWith('http') ? nextHref : "https://www.twitch.tv" + nextHref;
         sessionStorage.setItem("farmingLinkIndex", String(nextIndex));
         sessionStorage.removeItem("farmingLastProgress");
+        sessionStorage.removeItem("farmingLastPanelProgress");
+        sessionStorage.removeItem("farmingPanelChangedAt");
         sessionStorage.removeItem("farmingStalledChecks");
         sessionStorage.removeItem("farmingNoProgressChecks");
             var tracker = getDropsTracker();
@@ -2341,6 +2511,8 @@ function tryNextAvailableLink(gameName, campaignName) {
         sessionStorage.setItem("farmingSkipCampaigns", JSON.stringify(skipped));
         sessionStorage.setItem("farmingStallSameGame", String(gameIdx));
         sessionStorage.removeItem("farmingLastProgress");
+        sessionStorage.removeItem("farmingLastPanelProgress");
+        sessionStorage.removeItem("farmingPanelChangedAt");
         sessionStorage.removeItem("farmingStalledChecks");
         sessionStorage.removeItem("farmingNoProgressChecks");
             sessionStorage.removeItem("farmingAllLinks");
@@ -2360,8 +2532,7 @@ function stopInventoryChecking() {
     sessionStorage.removeItem("atqNextOfflineCheckAt");
 }
 
-// Absolute wall-clock markers for when each check next fires, so the Progress Manager can
-// count down without owning or duplicating any of the scheduling
+// Wall-clock times of the next checks, for the Progress Manager countdowns
 function markNextCheck(key, msFromNow) {
     sessionStorage.setItem(key, String(Date.now() + msFromNow));
 }
@@ -2395,8 +2566,7 @@ function checkCurrentStreamAlive() {
     return true;
 }
 
-// The site player, not any other video on the page: a channel page can carry a second
-// <video> for clips or ads, and sampling the wrong one reports playback that isn't the stream.
+// The stream player, not a clip or ad <video>
 function getPlayerVideo() {
     return document.querySelector('[data-a-target="video-player"] video')
         || document.querySelector('.persistent-player video');
@@ -2407,20 +2577,17 @@ function getPlayerStateAttr() {
     return btn ? btn.getAttribute('data-a-player-state') : null;
 }
 
-// "playing" | "stalled" | "unknown". Unknown means the player hasn't mounted yet and must
-// never be acted on, or a page that is merely slow would be reloaded out from under itself.
+// "playing" | "stalled" | "unknown"; unknown (player not mounted) is never acted on
 function getPlaybackState() {
     var video = getPlayerVideo();
     if (!video) return "unknown";
 
-    // A player that failed to initialise never attaches a MediaSource, so the element has
-    // no source at all. This is the signature of the frozen page.
+    // No source attached: the frozen-player signature
     if (!video.currentSrc && !video.src) return "stalled";
 
     if (video.paused || getPlayerStateAttr() === "paused") return "stalled";
 
-    // A player can also claim to be playing while frozen mid-buffer, which only shows up as
-    // currentTime refusing to advance between samples.
+    // Playing but frozen shows only as currentTime not advancing
     var now = Date.now();
     var t = video.currentTime;
     if (playbackLastTime === null || t !== playbackLastTime) {
@@ -2443,10 +2610,7 @@ function clearPlaybackReloads() {
     sessionStorage.removeItem("atqPlaybackReloadUrl");
 }
 
-// One rung per tick, escalating. Rungs 1-2 reuse the selectors already proven in the legacy
-// twitchCheckDisruptions loop. Rungs 3-4 are best effort only: a synthetic click carries no
-// user activation in Firefox, so if Twitch's play path demands a real gesture they do
-// nothing, which is why the reload rung exists and is reached within about a minute.
+// One escalating rung per tick. Synthetic clicks may do nothing in Firefox, hence the reload rung
 function attemptPlaybackRecovery() {
     var settings = getDropSettings();
     var step = playbackRecoveryStep;
@@ -2492,8 +2656,7 @@ function attemptPlaybackRecovery() {
     }
 
     if (step === 3) {
-        // The overlay is what a person hits when they click the stream by hand, and it is a
-        // different code path from the control bar button.
+        // The overlay is a different code path from the control bar button
         var overlay = document.querySelector('[data-a-target="player-overlay-click-handler"]');
         if (overlay) {
             popupText("Playback: clicking the player overlay");
@@ -2538,8 +2701,7 @@ function startPlaybackWatchdog() {
 
     function tick() {
         var state = getPlaybackState();
-        // The grace period covers a slow-mounting player, which would otherwise be reloaded
-        // before it ever had a chance to attach its source.
+        // Grace period for a slow-mounting player
         if (Date.now() - playbackWatchdogStartedAt < PLAYBACK_GRACE_MS) {
             state = "unknown";
         }
@@ -2565,6 +2727,144 @@ function stopPlaybackWatchdog() {
     sessionStorage.removeItem("atqNextPlaybackCheckAt");
 }
 
+var watchDropsReadPending = false;
+
+// A bare channel page ("/name"), not /about
+function isChannelPage() {
+    var parts = window.location.pathname.split('/').filter(Boolean);
+    return parts.length === 1 && parts[0] !== 'directory' && parts[0] !== 'drops';
+}
+
+function getWatchDropsDialog() {
+    return document.querySelector('[role="dialog"][aria-label="Drops & More"]');
+}
+
+function watchDropsDialogTitle(dialog) {
+    var t = dialog && dialog.querySelector('p.tw-title');
+    return t ? t.textContent.trim() : null;
+}
+
+// Each bar's tile holds titled <p>s (reward, game) and untitled ones (requirement, time left)
+function parseWatchDropsItems(dialog) {
+    var items = [];
+    dialog.querySelectorAll('[role="progressbar"]').forEach(function(bar) {
+        var tile = bar.parentElement;
+        while (tile && tile !== dialog && !tile.querySelector('p[title]')) tile = tile.parentElement;
+        if (!tile || tile === dialog) return;
+        var titled = tile.querySelectorAll('p[title]');
+        var plain = Array.from(tile.querySelectorAll('p:not([title])'))
+            .map(function(p) { return p.textContent.trim(); }).filter(Boolean);
+        var percent = parseFloat(bar.getAttribute('aria-valuenow'));
+        if (isNaN(percent)) return;
+        items.push({
+            name: titled[0].textContent.trim(),
+            game: titled[1] ? titled[1].textContent.trim() : null,
+            percent: percent,
+            requirement: plain[0] || null,
+            left: plain[1] || null
+        });
+    });
+    return items;
+}
+
+// Reads Drops & More > Watch Drops, then restores the panel and chat state. ok:false = unreadable
+function readWatchDropsPanel() {
+    return new Promise(function(resolve) {
+        var failed = { ok: false, items: [] };
+        if (watchDropsReadPending || !isChannelPage() || !document.querySelector('[data-a-target="drops-button"]')) {
+            resolve(failed);
+            return;
+        }
+        watchDropsReadPending = true;
+        var settled = false;
+        var openedPanel = false;
+        var expandedChat = false;
+        var startedAt = Date.now();
+
+        function finish(result) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(cap);
+            var dialog = getWatchDropsDialog();
+            if (openedPanel && dialog) {
+                var close = dialog.querySelector('button[aria-label="Close"]');
+                if (close) close.click();
+            }
+            if (expandedChat) {
+                var toggle = document.querySelector('[data-a-target="right-column__toggle-collapse-btn"]');
+                if (toggle && toggle.getAttribute('aria-label') === 'Collapse Chat') toggle.click();
+            }
+            watchDropsReadPending = false;
+            if (result.ok) {
+                GM_setValue('watchDropsSnapshot', { takenAt: Date.now(), channel: window.location.pathname, items: result.items });
+            }
+            popupText("Debug: Watch Drops read " + (result.ok ? "ok (" + result.items.length + " items)" : "FAILED") + " in " + (Date.now() - startedAt) + "ms");
+            resolve(result);
+        }
+        var cap = setTimeout(function() { finish(failed); }, 15000);
+
+        // Items can trail the view switch, so wait for a bar; a view with none is still a valid read
+        function readWatchView() {
+            waitForCondition(document.body, function() {
+                if (settled) return true;
+                var dialog = getWatchDropsDialog();
+                if (!dialog || watchDropsDialogTitle(dialog) !== 'Watch Drops') return false;
+                if (!dialog.querySelector('[role="progressbar"]')) return false;
+                finish({ ok: true, items: parseWatchDropsItems(dialog) });
+                return true;
+            }, { pollMs: 250, timeoutMs: 5000, onTimeout: function() {
+                var dialog = getWatchDropsDialog();
+                if (dialog && watchDropsDialogTitle(dialog) === 'Watch Drops') finish({ ok: true, items: [] });
+                else finish(failed);
+            } });
+        }
+
+        function openWatchView() {
+            var clickedHeader = false;
+            waitForCondition(document.body, function() {
+                if (settled) return true;
+                var dialog = getWatchDropsDialog();
+                if (!dialog) return false;
+                if (watchDropsDialogTitle(dialog) === 'Watch Drops') { readWatchView(); return true; }
+                if (clickedHeader) return false;
+                var header = Array.from(dialog.querySelectorAll('[role="button"]')).find(function(h) {
+                    return h.textContent.trim() === 'Watch Drops';
+                });
+                if (!header) return false;
+                header.click();
+                clickedHeader = true;
+                return false;
+            }, { pollMs: 250, timeoutMs: 5000, onTimeout: function() { finish(failed); } });
+        }
+
+        if (getWatchDropsDialog()) { openWatchView(); return; }
+
+        var rightColumn = document.querySelector('.right-column');
+        var chatToggle = document.querySelector('[data-a-target="right-column__toggle-collapse-btn"]');
+        if (rightColumn && rightColumn.classList.contains('right-column--collapsed') && chatToggle) {
+            chatToggle.click();
+            expandedChat = true;
+        }
+        var clickedButton = false;
+        waitForCondition(document.body, function() {
+            if (settled) return true;
+            if (getWatchDropsDialog()) { openWatchView(); return true; }
+            if (!clickedButton) {
+                var btn = document.querySelector('[data-a-target="drops-button"]');
+                if (btn) { btn.click(); clickedButton = true; openedPanel = true; }
+            }
+            return false;
+        }, { pollMs: 250, timeoutMs: 5000, onTimeout: function() { finish(failed); } });
+    });
+}
+
+// The panel lists rewards, not campaigns, so match by drop name. Without names there is no telling
+// this campaign's items from another campaign of the same game, so the inventory decides instead.
+function watchDropsForCampaign(items, campaign) {
+    var names = (campaign.drops || []).concat(campaign.nonWatchDrops || []);
+    return items.filter(function(d) { return names.indexOf(d.name) !== -1; });
+}
+
 function runOfflineCheck() {
     var gn = sessionStorage.getItem("farmingGameName");
     var cn = sessionStorage.getItem("farmingCampaignName");
@@ -2572,8 +2872,13 @@ function runOfflineCheck() {
     var streamAlive = checkCurrentStreamAlive();
     if (streamAlive === false) {
         stopInventoryChecking();
+        var link = currentFarmingLink();
         if (gn === "__fallback__") {
             tryNextFallbackChannel();
+        } else if (link && link.includes("/directory/category")) {
+            // One offline streamer says nothing about the category, so pick another stream
+            popupText("Stream offline, picking another stream from the category");
+            cleanRedirect(normalizeTwitchUrl(link));
         } else {
             popupText("Stream offline, trying next link");
             tryNextAvailableLink(gn, cn);
@@ -2592,7 +2897,7 @@ function runPriorityCheck() {
     checkForHigherPriorityCampaign().then(function(higherFound) {
         if (higherFound) {
             stopInventoryChecking();
-            popupText("Higher priority campaign available. Returning to campaigns");
+            if (higherFound === true) popupText("Higher priority campaign available. Returning to campaigns");
             cleanRedirect("https://www.twitch.tv/drops/campaigns");
         } else {
             popupText("Debug: No higher priority campaigns found");
@@ -2619,7 +2924,7 @@ function runInventoryCheck() {
         checkForHigherPriorityCampaign().then(function(higherFound) {
             if (higherFound) {
                 stopInventoryChecking();
-                popupText("Higher priority campaign available. Returning to campaigns");
+                if (higherFound === true) popupText("Higher priority campaign available. Returning to campaigns");
                 cleanRedirect("https://www.twitch.tv/drops/campaigns");
             } else if (onNone) {
                 onNone();
@@ -2628,8 +2933,7 @@ function runInventoryCheck() {
     }
 
     if (gameName === "__fallback__") {
-        // Read the inventory first so higher priority campaigns that are already claimed are
-        // marked done and can't pull us off the fallback stream
+        // Inventory first, so already-claimed higher priority campaigns can't pull us off the fallback
         loadInventoryPage().then(function(inv) {
             applyInventoryToTracker(inv);
             returnIfHigherPriority(null);
@@ -2643,44 +2947,9 @@ function runInventoryCheck() {
         stopInventoryChecking();
         return;
     }
-    loadInventoryPage().then(function(inv) {
-        var noProgressCheckLimit = getDropSettings().noProgressCheckLimit;
-        if (!inv.ok) {
-            // Iframe timed out, threw, or never rendered. That says nothing about the
-            // campaign, so leave every counter untouched and retry on the next tick.
-            popupText("Debug: Inventory check failed to read the page, skipping this tick");
-            return;
-        }
-        applyInventoryToTracker(inv);
-        var tracked = getDropsTracker()[gameName]?.find(c => c.name === campaignName);
-        if (!tracked || tracked.completed) {
-            stopInventoryChecking();
-            popupText("Campaign completed: " + campaignName + ". Returning to campaigns");
-            cleanRedirect("https://www.twitch.tv/drops/campaigns");
-            return;
-        }
+    var noProgressCheckLimit = getDropSettings().noProgressCheckLimit;
 
-        var live = inv.campaigns.find(function(c) { return c.name === campaignName; });
-        if (!live) {
-            // Not In Progress and not claimed: progress hasn't registered yet or this stream
-            // isn't counting. Consecutive strikes are required so one flaky render can't give
-            // up on a working stream.
-            var missCount = parseInt(sessionStorage.getItem("farmingNoProgressChecks") || "0") + 1;
-            if (missCount >= noProgressCheckLimit) {
-                sessionStorage.removeItem("farmingNoProgressChecks");
-                stopInventoryChecking();
-                popupText(campaignName + " not in inventory and not claimed. Treating as stalled, trying next link");
-                tryNextAvailableLink(gameName, campaignName);
-                return;
-            }
-            sessionStorage.setItem("farmingNoProgressChecks", String(missCount));
-            popupText("Debug: " + campaignName + " not in inventory (" + missCount + "/" + noProgressCheckLimit + "), continuing to watch");
-            returnIfHigherPriority(null);
-            return;
-        }
-
-        sessionStorage.removeItem("farmingNoProgressChecks");
-        var currentProgress = campaignProgressFingerprint(live);
+    function evaluateProgress(currentProgress) {
         popupText("Current Progress: " + currentProgress);
         returnIfHigherPriority(function() {
             if (currentProgress === null) return;
@@ -2700,7 +2969,89 @@ function runInventoryCheck() {
                 sessionStorage.removeItem("farmingStalledChecks");
             }
         });
+    }
+
+    // The Watch Drops panel shows reward progress too; the inventory decides what it can't
+    readWatchDropsPanel().then(function(panel) {
+        var items = panel.ok ? watchDropsForCampaign(panel.items, campaign) : [];
+        if (items.length > 0 && items.some(function(d) { return d.percent < 100; })) {
+            // The panel often stops updating after the first read, so only a change counts
+            var panelProgress = "panel:" + items.map(function(d) { return d.percent; }).join(",");
+            if (sessionStorage.getItem("farmingLastPanelProgress") !== panelProgress) {
+                sessionStorage.setItem("farmingLastPanelProgress", panelProgress);
+                sessionStorage.setItem("farmingPanelChangedAt", String(Date.now()));
+                sessionStorage.removeItem("farmingStalledChecks");
+                sessionStorage.removeItem("farmingNoProgressChecks");
+                popupText("Current Progress: " + panelProgress);
+                returnIfHigherPriority(null);
+                return;
+            }
+            if (campaign.reward) {
+                // The inventory never lists reward campaigns, so the panel is the only judge
+                var changedAt = parseInt(sessionStorage.getItem("farmingPanelChangedAt") || "0");
+                if (changedAt && Date.now() - changedAt > 30 * 60000) {
+                    stopInventoryChecking();
+                    popupText(campaignName + " Watch Drops unchanged for 30 min. Treating as stalled, trying next link");
+                    tryNextAvailableLink(gameName, campaignName);
+                    return;
+                }
+                popupText("Debug: " + campaignName + " Watch Drops unchanged, continuing to watch");
+                returnIfHigherPriority(null);
+                return;
+            }
+            popupText("Debug: " + campaignName + " Watch Drops unchanged, checking inventory");
+            runInventoryFallback();
+            return;
+        }
+        popupText("Debug: " + (panel.ok ? "No unfinished " + campaignName + " drops in Watch Drops" : "Watch Drops unreadable") + ", using inventory");
+        runInventoryFallback();
     });
+
+    function runInventoryFallback() {
+        loadInventoryPage().then(function(inv) {
+            if (!inv.ok) {
+                // A failed read says nothing about the campaign; retry next tick
+                popupText("Debug: Inventory check failed to read the page, skipping this tick");
+                return;
+            }
+            applyInventoryToTracker(inv);
+            var tracked = getDropsTracker()[gameName]?.find(c => c.name === campaignName);
+            if (!tracked || tracked.completed) {
+                stopInventoryChecking();
+                popupText("Campaign completed: " + campaignName + ". Returning to campaigns");
+                cleanRedirect("https://www.twitch.tv/drops/campaigns");
+                return;
+            }
+
+            var live = inv.campaigns.find(function(c) { return c.name === campaignName; });
+            if (!live && tracked.reward) {
+                // Reward campaigns are never In Progress, so absence isn't a miss
+                popupText("Debug: " + campaignName + " is a reward campaign, not in Rewards yet, continuing to watch");
+                returnIfHigherPriority(null);
+                return;
+            }
+            if (!live) {
+                // Not In Progress or claimed; needs consecutive strikes before giving up
+                var missCount = parseInt(sessionStorage.getItem("farmingNoProgressChecks") || "0") + 1;
+                if (missCount >= noProgressCheckLimit) {
+                    sessionStorage.removeItem("farmingNoProgressChecks");
+                    stopInventoryChecking();
+                    popupText(campaignName + " not in inventory and not claimed. Treating as stalled, trying next link");
+                    tryNextAvailableLink(gameName, campaignName);
+                    return;
+                }
+                sessionStorage.setItem("farmingNoProgressChecks", String(missCount));
+                popupText("Debug: " + campaignName + " not in inventory (" + missCount + "/" + noProgressCheckLimit + "), continuing to watch");
+                returnIfHigherPriority(null);
+                return;
+            }
+
+            sessionStorage.removeItem("farmingNoProgressChecks");
+            var fingerprint = campaignProgressFingerprint(live);
+            // Prefixed so switching between the panel and the inventory never reads as a stall
+            evaluateProgress(fingerprint === null ? null : "inv:" + fingerprint);
+        });
+    }
 }
 
 function startInventoryChecking() {
@@ -2713,7 +3064,8 @@ function startInventoryChecking() {
     var campaignName = sessionStorage.getItem("farmingCampaignName");
     if (!gameName || !campaignName) return;
     popupText("Starting checks - offline: " + offlineCheckMinutes + " min, inventory: " + checkIntervalMinutes + " min");
-    startPlaybackWatchdog();
+    // The about page has no stream to watch; on an offline one the watchdog would start the VOD preview
+    if (!window.location.pathname.endsWith('/about')) startPlaybackWatchdog();
 
     function offlineTick() {
         runOfflineCheck();
@@ -2979,9 +3331,16 @@ function popupText(string) {
     var current = new Date();
     var mins = ("0"+current.getMinutes()).slice(-2);
     var detailedString = string + " | " + current.getHours() + ":" + mins + ", v" + GM_info.script.version;
-    var pastLogHistory = sessionStorage.getItem("ATQPermaLog") == null ? "" : sessionStorage.getItem("ATQPermaLog") + " /// ";
-    var currentLogHistory = pastLogHistory + detailedString;
-    sessionStorage.setItem("ATQPermaLog", currentLogHistory);
+    // Capped: an unbounded log hits the storage quota and setItem throws mid-farming
+    try {
+        var past = sessionStorage.getItem("ATQPermaLog");
+        var entries = past ? past.split(" /// ") : [];
+        entries.push(detailedString);
+        if (entries.length > 1500) entries = entries.slice(-1500);
+        sessionStorage.setItem("ATQPermaLog", entries.join(" /// "));
+    } catch (e) {
+        console.error("[ATQ] Could not write ATQPermaLog", e);
+    }
     removeConfirmPopup();
     var box = document.createElement("div");
     box.id = "userscriptPopupWindow";
@@ -3034,7 +3393,6 @@ var clickChecker = false;
 // Toggle to enable category watching mode
 var infoLoaded = false;
 var viewerCountLoaded = false;
-var tagCount = null;
 // Sets up boolean and timers for YouTube and Twitch to be null so they can see if they exist or not
 var timeoutCreated = false;
 var noDropsReload = null;
@@ -3083,6 +3441,9 @@ async function detectSite() {
             sessionStorage.removeItem("twitchAboutLocation");
 
             createLoopingInterval(twitchCategoryWatcher, 1000);
+        } else if (locationContains("/drops/campaigns")) {
+            // Those keys outlive their stream; without this the campaigns page is sent back to it after 30s
+            removeConfirmPopup();
         } else if (sessionStorage.getItem("twitchWatchedCategory") != null) {
             // Loop continuation from 4
             popupText("ALWU: 5 - Continuing from Twitch Category Watcher");
@@ -3187,7 +3548,8 @@ function twitchAboutMethod() {
 }
 
 function twitchCheckDisruptions() {
-    var offlineText = $('.channel-root__player--offline .home-offline-hero .tw-title:contains("Check out")');
+    // Any offline player, not just the "Check out this stream" variant shown when a recent VOD exists
+    var offlineText = $('.channel-root__player--offline');
     var followPanelOverlay = $(".follow-panel-overlay:contains('Follow and get notified when')");
     var currentlyLive = $('.home-carousel-info--live .channel-status-info--live:contains("Live Now")');
     var pauseButton = $('[data-a-target="player-play-pause-button"]');
@@ -3249,8 +3611,8 @@ function twitchCategoryWatcher() {
     var liveStreamList = $(".preview-card-image-link");
 
     if (liveStreamList.length == 0 && noDropStreamsAvailable == null) {
-        popupText("Twitch: noDropStreamsAvailable = setTimeout(resetLocation, 300000);");
-        noDropStreamsAvailable = setTimeout(resetLocation, 300000);
+        popupText("Twitch: noDropStreamsAvailable = setTimeout(categoryEmpty, 300000);");
+        noDropStreamsAvailable = setTimeout(categoryEmpty, 300000);
     } else if (liveStreamList.length != 0) {
         if (noDropStreamsAvailable != null) {
             popupText("Twitch: resetTimeout(noDropStreamsAvailable);");
@@ -3269,27 +3631,33 @@ function twitchCategoryWatcher() {
     }
 }
 
+// While farming, treat an empty category like an offline stream instead of reloading it
+function categoryEmpty() {
+    var gn = sessionStorage.getItem("farmingGameName");
+    var cn = sessionStorage.getItem("farmingCampaignName");
+    if (sessionStorage.getItem("AutoTwitchQueuerAutoFarmCampaigns") == "true" && gn && cn) {
+        if (gn === "__fallback__") {
+            if (tryNextFallbackChannel()) return;
+        } else {
+            popupText("No live drop streams in category, trying next link");
+            tryNextAvailableLink(gn, cn);
+            return;
+        }
+    }
+    resetLocation();
+}
+
 function twitchCategoryChannelWatcher() {
     // If script is watching a category, check for the right game; if not present, return to stream list
     var currentGame = resetToLocation.replace("https://www.twitch.tv/","").replace("?filter=drops&sort=VIEWER_COUNT","");
     currentGame = $("[href*='"+currentGame+"']").prop("href") + "?filter=drops&sort=VIEWER_COUNT";
-    var currentTagCount = $('[aria-label^="Tag"]').length;
-
     if (currentGame != "undefined?filter=drops&sort=VIEWER_COUNT" && infoLoaded == false) {
-        // Checks for the drops enabled tag to be loaded in the first place
+        // Waits for the stream's game link to load in the first place
         infoLoaded = true;
-    } else if (infoLoaded == true) {
-        if (tagCount == null) {
-            tagCount = currentTagCount;
-        } else if (tagCount != currentTagCount) {
-            // If the amount of tags change, maybe it's a channel with no more drops, so return to the drops list
-            popupText("Twitch: tagCount != currentTagCount");
-            return resetLocation();
-        } else if (currentGame != resetToLocation) {
-            // If the current game is not the game you started with, go back to the game list
-            popupText("Twitch: currentGame != resetToLocation");
-            return resetLocation();
-        }
+    } else if (infoLoaded == true && currentGame != resetToLocation) {
+        // If the current game is not the game you started with, go back to the game list
+        popupText("Twitch: currentGame != resetToLocation");
+        return resetLocation();
     }
 
     twitchCheckDisruptions();
@@ -3354,12 +3722,7 @@ function locationContains(string) {
     return window.location.toString().indexOf(string) != -1;
 }
 
-// Waits for the DOM to satisfy `predicate`, which must return true once it is satisfied.
-// A MutationObserver alone is not enough: Twitch's React app stops mutating the DOM while the
-// tab is hidden, so an observer-only wait never fires until the tab is focused again. Timers are
-// throttled in background tabs but never stopped, so the poll is the trigger that actually works
-// there. `settled` keeps exactly one of the four triggers winning, because callers like
-// farmNextPriority are not safe to enter twice.
+// Waits until predicate() returns true. Polls as well as observing, since a hidden tab stops mutating; settled lets only one trigger win
 function waitForCondition(root, predicate, options) {
     options = options || {};
     var pollMs = options.pollMs || 1000;
@@ -3376,8 +3739,7 @@ function waitForCondition(root, predicate, options) {
         if (deadline !== null) { clearTimeout(deadline); deadline = null; }
     }
 
-    // fromMutation lets a predicate tell a real DOM change apart from a poll tick, which matters
-    // for the ones that debounce: resetting their timer on every tick would starve it.
+    // fromMutation lets debouncing predicates ignore poll ticks
     function attempt(fromMutation) {
         if (settled) return true;
         var done = false;
