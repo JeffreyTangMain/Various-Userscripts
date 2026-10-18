@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Keep Tab Awake
 // @description  Generate a near-silent tone to prevent Firefox throttling background tabs
-// @version      1.0.0
+// @version      1.0.1
 // @match        *://*/*
 // @noframes
 // @grant        GM_registerMenuCommand
