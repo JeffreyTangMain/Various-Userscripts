@@ -11,8 +11,8 @@
 // ==/UserScript==
 
 (() => {
-  const FREQ = 40;
-  let gainValue = GM_getValue('gain', 0.001);
+  const FREQ = 1;
+  let gainValue = GM_getValue('gain', 0.0004);
   let ctx = null, gainNode = null, menuIds = [];
 
   function unlockOnInteraction() {
