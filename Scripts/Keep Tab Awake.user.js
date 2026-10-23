@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Keep Tab Awake
 // @description  Generate a near-silent tone to prevent Firefox throttling background tabs
-// @version      1.1.0
+// @version      1.2.0
 // @match        *://*/*
 // @noframes
 // @run-at       document-start
@@ -20,39 +20,73 @@
   const HOST = location.host;
   const SITE_KEY = 'site:' + HOST;
   const LINK_KEY = 'link:' + HOST + location.pathname + location.search;
-  const muteKey = scope => 'mute:' + scope;
-  const webAudioKey = scope => 'webaudio:' + scope;
+  const OFF = { awake: false, mute: false, webAudio: false };
   let gainValue = GM_getValue('gain', 0.0004);
   let ctx = null, gainNode = null, shownIds = [];
+  // Settings from the most specific level that applies to this page, refreshed by sync()
+  let current = OFF;
   // Page media volumes from before muting, restored on unmute
   const savedVolumes = new Map();
   // One GainNode per page AudioContext, sitting in front of its destination
   const pageGains = new Map();
   let pagePatched = false;
+  let panel = null;
 
-  function isOn(key) {
-    return GM_getValue(key, false);
+  const pick = p => ({ awake: !!p.awake, mute: !!p.mute, webAudio: !!p.webAudio });
+
+  function migrate() {
+    // Earlier versions stored `true` per site/link with separate mute:/webaudio: keys
+    const keys = GM_listValues();
+    keys.filter(key => /^(site|link):/.test(key) && GM_getValue(key) === true).forEach(key => {
+      GM_setValue(key, {
+        awake: true,
+        mute: GM_getValue('mute:' + key, false),
+        webAudio: GM_getValue('webaudio:' + key, false),
+      });
+    });
+    keys.filter(key => /^(mute|webaudio):/.test(key)).forEach(key => GM_deleteValue(key));
   }
 
-  function setOn(key, on) {
-    // Delete rather than store false so turned-off pages don't pile up
-    on ? GM_setValue(key, true) : GM_deleteValue(key);
+  const loadRules = () => GM_getValue('regexes', []);
+
+  function compile(pattern) {
+    try { return new RegExp(pattern); } catch { return null; }
   }
 
-  function scope() {
-    if (isOn(SITE_KEY)) return SITE_KEY;
-    if (isOn(LINK_KEY)) return LINK_KEY;
+  function firstMatch(rules, url) {
+    return rules.findIndex(rule => compile(rule.pattern)?.test(url));
+  }
+
+  // Most specific level first: link > regex > site
+  function active() {
+    const link = GM_getValue(LINK_KEY, null);
+    if (link) return { kind: 'link', profile: link, save: p => GM_setValue(LINK_KEY, p) };
+    const rules = loadRules();
+    const i = firstMatch(rules, location.href);
+    if (i >= 0) {
+      return {
+        kind: 'regex',
+        profile: rules[i],
+        save: p => {
+          const fresh = loadRules();
+          fresh[i] = { ...fresh[i], ...p };
+          GM_setValue('regexes', fresh);
+        },
+      };
+    }
+    const site = GM_getValue(SITE_KEY, null);
+    if (site) return { kind: 'site', profile: site, save: p => GM_setValue(SITE_KEY, p) };
     return null;
   }
 
-  function muted() {
-    const s = scope();
-    return !!s && isOn(muteKey(s));
+  // A new level starts as a copy of what the page already does, so nothing changes until edited
+  function newProfile() {
+    const a = active();
+    return a ? pick(a.profile) : { awake: true, mute: false, webAudio: false };
   }
 
-  function webAudioMuted() {
-    return muted() && isOn(webAudioKey(scope()));
-  }
+  const muted = () => current.mute;
+  const webAudioMuted = () => current.mute && current.webAudio;
 
   function unlockOnInteraction() {
     // Firefox blocks audio until the page gets a click or key press
@@ -153,52 +187,39 @@
   }
 
   function sync() {
-    const want = !!scope();
-    if (want && !ctx) start();
-    else if (!want) stop();
+    const a = active();
+    current = a ? pick(a.profile) : OFF;
+    if (current.awake && !ctx) start();
+    else if (!current.awake) stop();
     if (webAudioMuted()) patchPage();
     applyAll();
     buildMenu();
   }
 
-  function clearMute(s) {
-    setOn(muteKey(s), false);
-    setOn(webAudioKey(s), false);
-  }
-
   function toggleLink() {
-    if (isOn(LINK_KEY)) {
-      setOn(LINK_KEY, false);
-      clearMute(LINK_KEY);
-    } else {
-      setOn(LINK_KEY, true);
-    }
+    if (GM_getValue(LINK_KEY, null)) GM_deleteValue(LINK_KEY);
+    else GM_setValue(LINK_KEY, newProfile());
     sync();
   }
 
   function toggleSite() {
-    if (isOn(SITE_KEY)) {
-      setOn(SITE_KEY, false);
-      clearMute(SITE_KEY);
+    if (GM_getValue(SITE_KEY, null)) {
+      GM_deleteValue(SITE_KEY);
     } else {
-      setOn(SITE_KEY, true);
-      // Carry this page's mute settings over so it doesn't suddenly get loud
-      if (isOn(muteKey(LINK_KEY))) setOn(muteKey(SITE_KEY), true);
-      if (isOn(webAudioKey(LINK_KEY))) setOn(webAudioKey(SITE_KEY), true);
-      // The site toggle makes link toggles redundant; the trailing / stops example.com matching example.com.au
-      const prefixes = ['link:', 'mute:link:', 'webaudio:link:'].map(p => p + HOST + '/');
-      GM_listValues()
-        .filter(key => prefixes.some(p => key.startsWith(p)))
-        .forEach(key => GM_deleteValue(key));
+      GM_setValue(SITE_KEY, newProfile());
+      // Link levels on this site become redundant; the trailing / stops example.com matching example.com.au
+      const prefix = 'link:' + HOST + '/';
+      GM_listValues().filter(key => key.startsWith(prefix)).forEach(key => GM_deleteValue(key));
     }
     sync();
   }
 
-  function toggleScoped(keyFor) {
-    const s = scope();
-    if (!s) return;
-    setOn(keyFor(s), !isOn(keyFor(s)));
+  function toggleSetting(field) {
+    const a = active();
+    if (!a) return;
+    a.save({ ...pick(a.profile), [field]: !a.profile[field] });
     sync();
+    if (panel && a.kind === 'regex') panel.reload();
   }
 
   function setGain(factor) {
@@ -209,21 +230,33 @@
     buildMenu();
   }
 
-  function toggleLabel(icon, name, key) {
-    if (!isOn(key)) return `${icon} ${name}: OFF`;
-    if (ctx && ctx.state !== 'running') return `${icon} ${name}: ON ⏳ click page to start`;
-    return `${icon} ${name}: ON`;
-  }
-
   const onOff = on => on ? 'ON' : 'OFF';
 
+  function awakeLabel(level) {
+    const label = `☕ Keep awake (${level}): ${onOff(current.awake)}`;
+    return current.awake && ctx && ctx.state !== 'running' ? label + ' ⏳ click page to start' : label;
+  }
+
   function buildMenu() {
-    const s = scope();
+    const a = active();
+    const rules = loadRules();
+    const ruleIndex = firstMatch(rules, location.href);
     const entries = [];
-    if (s !== SITE_KEY) entries.push(['link', toggleLabel('🔗', 'This link', LINK_KEY), toggleLink]);
-    entries.push(['site', toggleLabel('🌐', 'This site', SITE_KEY), toggleSite]);
-    if (s) entries.push(['mute', `🔇 Mute audio: ${onOff(muted())}`, () => toggleScoped(muteKey)]);
-    if (muted()) entries.push(['webaudio', `🎛 Also mute Web Audio: ${onOff(webAudioMuted())}`, () => toggleScoped(webAudioKey)]);
+    entries.push(['link', `🔗 This link: ${onOff(GM_getValue(LINK_KEY, null))}`, toggleLink]);
+    if (ruleIndex >= 0) {
+      const pattern = rules[ruleIndex].pattern;
+      const short = pattern.length > 40 ? pattern.slice(0, 39) + '…' : pattern;
+      entries.push(['regex', `🧩 Regex /${short}/`, openPanel]);
+    }
+    entries.push(['site', `🌐 This site: ${onOff(GM_getValue(SITE_KEY, null))}`, toggleSite]);
+    if (a) {
+      entries.push(['awake', awakeLabel(a.kind), () => toggleSetting('awake')]);
+      entries.push(['mute', `🔇 Mute audio (${a.kind}): ${onOff(current.mute)}`, () => toggleSetting('mute')]);
+      if (current.mute) {
+        entries.push(['webaudio', `🎛 Also mute Web Audio (${a.kind}): ${onOff(current.webAudio)}`, () => toggleSetting('webAudio')]);
+      }
+    }
+    entries.push(['rules', '🧩 Regex rules…', openPanel]);
     entries.push(['louder', `🔊 Louder (gain ${gainValue.toFixed(4)})`, () => setGain(2)]);
     entries.push(['quieter', '🔉 Quieter', () => setGain(0.5)]);
 
@@ -236,5 +269,149 @@
     shownIds = entries.map(([id]) => id);
   }
 
+  const PANEL_CSS = `
+    :host { all: initial; }
+    .panel {
+      --bg: #ffffff; --fg: #1d1d1f; --muted: #6b6b70; --line: #d8d8dc; --field: #f4f4f6;
+      --ok: #1a7f37; --bad: #b42318; --accent: #2f6fdb;
+      position: fixed; top: 16px; right: 16px; z-index: 2147483647;
+      width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto;
+      box-sizing: border-box; padding: 14px 16px;
+      background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 10px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, .25);
+      font: 13px/1.4 system-ui, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      .panel {
+        --bg: #1e1e21; --fg: #ececf0; --muted: #9a9aa2; --line: #3a3a40; --field: #2a2a2f;
+        --ok: #4ac26b; --bad: #ff7b72; --accent: #6d9eff;
+      }
+    }
+    .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    h2 { margin: 0; font-size: 15px; font-weight: 600; }
+    label.test { display: block; color: var(--muted); margin-bottom: 4px; }
+    input[type=text] {
+      width: 100%; box-sizing: border-box; padding: 6px 8px;
+      background: var(--field); color: var(--fg); border: 1px solid var(--line); border-radius: 6px;
+      font: 12px ui-monospace, monospace;
+    }
+    .rule { border-top: 1px solid var(--line); padding: 10px 0; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row input[type=text] { flex: 1; }
+    .opts { display: flex; gap: 14px; margin-top: 6px; color: var(--muted); }
+    .opts label { display: flex; gap: 4px; align-items: center; cursor: pointer; }
+    .badge { min-width: 62px; text-align: right; font-size: 12px; color: var(--muted); }
+    .badge.ok { color: var(--ok); } .badge.bad { color: var(--bad); }
+    button {
+      padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px;
+      background: var(--field); color: var(--fg); font: inherit; cursor: pointer;
+    }
+    button.add { margin-top: 10px; color: var(--accent); }
+    .hint { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+    .tests { margin-bottom: 4px; }
+  `;
+
+  function h(tag, props = {}, ...children) {
+    const el = document.createElement(tag);
+    Object.entries(props).forEach(([k, v]) => {
+      if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+      else if (k === 'class') el.className = v;
+      else el[k] = v;
+    });
+    children.forEach(c => el.append(c));
+    return el;
+  }
+
+  const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  function openPanel() {
+    if (panel) return;
+    const host = h('div');
+    const root = host.attachShadow({ mode: 'closed' });
+    let rules = loadRules();
+    const list = h('div');
+    const testInput = h('input', { type: 'text', value: location.href, oninput: refreshBadges });
+    const badges = [];
+
+    function save() {
+      GM_setValue('regexes', rules);
+      refreshBadges();
+      sync();
+    }
+
+    function refreshBadges() {
+      let applied = false;
+      badges.forEach((badge, i) => {
+        if (!rules[i]) return;
+        const re = compile(rules[i].pattern);
+        if (!re) {
+          badge.textContent = 'invalid';
+          badge.className = 'badge bad';
+        } else if (re.test(testInput.value)) {
+          badge.textContent = applied ? '✓ match' : '✓ applies';
+          badge.className = 'badge ok';
+          applied = true;
+        } else {
+          badge.textContent = '✗';
+          badge.className = 'badge';
+        }
+      });
+    }
+
+    function render() {
+      list.replaceChildren();
+      badges.length = 0;
+      rules.forEach((rule, i) => {
+        const badge = h('span', { class: 'badge' });
+        badges.push(badge);
+        const check = (field, text) => h('label', {},
+          h('input', { type: 'checkbox', checked: !!rule[field], onchange: e => { rule[field] = e.target.checked; save(); } }),
+          text);
+        list.append(h('div', { class: 'rule' },
+          h('div', { class: 'row' },
+            h('input', { type: 'text', value: rule.pattern, spellcheck: false, oninput: e => { rule.pattern = e.target.value; save(); } }),
+            badge,
+            h('button', { title: 'Delete rule', onclick: () => { rules.splice(i, 1); render(); save(); } }, '🗑')),
+          h('div', { class: 'opts' }, check('awake', 'Keep awake'), check('mute', 'Mute audio'), check('webAudio', 'Mute Web Audio'))));
+      });
+      refreshBadges();
+    }
+
+    function close() {
+      host.remove();
+      window.removeEventListener('keydown', onEscape, true);
+      panel = null;
+    }
+
+    function onEscape(e) {
+      if (e.key === 'Escape') close();
+    }
+
+    const style = h('style');
+    style.textContent = PANEL_CSS;
+    const box = h('div', { class: 'panel' },
+      h('div', { class: 'head' }, h('h2', {}, 'Regex rules'), h('button', { title: 'Close', onclick: close }, '✕')),
+      h('div', { class: 'tests' }, h('label', { class: 'test' }, 'Test URL'), testInput),
+      list,
+      h('button', {
+        class: 'add',
+        onclick: () => {
+          rules.push({ pattern: escapeRegex(HOST), awake: true, mute: false, webAudio: false });
+          render();
+          save();
+          list.lastChild.querySelector('input').focus();
+        },
+      }, '+ Add rule'),
+      h('p', { class: 'hint' }, 'Rules match the full URL. The first matching rule applies. This link overrides rules, rules override this site.'));
+    // Keep typing in the panel from triggering the page's keyboard shortcuts
+    ['keydown', 'keyup', 'keypress'].forEach(type => box.addEventListener(type, e => e.stopPropagation()));
+    root.append(style, box);
+    document.documentElement.append(host);
+    window.addEventListener('keydown', onEscape, true);
+    render();
+    panel = { reload: () => { rules = loadRules(); render(); } };
+  }
+
+  migrate();
   sync();
 })();
